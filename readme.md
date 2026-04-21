@@ -240,8 +240,18 @@ sp_vision_25
     ├── trajectory.hpp             // 弹道解算
     ├── yaml.hpp                   // YAML配置文件解析器
     └── ...
-```    
+```
 
+### 3.6 标定配置说明
+当前标定流程统一使用方形棋盘格（`findChessboardCorners`），`configs/calibration.yaml` 中与标定板相关的字段定义如下：
+
+```yaml
+chessboard_corner_cols: 10  # 棋盘格内角点列数（不是方格列数）
+chessboard_corner_rows: 7   # 棋盘格内角点行数（不是方格行数）
+square_size_mm: 40          # 相邻内角点间距，单位 mm（通常等于方格边长）
+```
+
+`calibration/calibrate_camera.cpp`、`calibration/calibrate_handeye.cpp`、`calibration/calibrate_robotworld_handeye.cpp`、`calibration/capture.cpp` 都读取上述字段。
 
 ## 4 轨迹视角下的自瞄理论
 ### 4.1 引言

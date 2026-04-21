@@ -11,5 +11,4 @@ add_library(tools OBJECT
     recorder.cpp
     logger.cpp
     pid.cpp
-    crc.cpp
 )

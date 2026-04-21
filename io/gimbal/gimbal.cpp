@@ -17,13 +17,10 @@ Gimbal::Gimbal(const std::string & config_path)
     serial_.open();
   } catch (const std::exception & e) {
     tools::logger()->error("[Gimbal] Failed to open serial: {}", e.what());
-    exit(1);
   }
 
   thread_ = std::thread(&Gimbal::read_thread, this);
 
-  queue_.pop();
-  tools::logger()->info("[Gimbal] First q received.");
 }
 
 Gimbal::~Gimbal()
@@ -122,7 +119,7 @@ bool Gimbal::read(uint8_t * buffer, size_t size)
   try {
     return serial_.read(buffer, size) == size;
   } catch (const std::exception & e) {
-    // tools::logger()->warn("[Gimbal] Failed to read serial: {}", e.what());
+    tools::logger()->warn("[Gimbal] Failed to read serial: {}", e.what());
     return false;
   }
 }
@@ -145,7 +142,7 @@ void Gimbal::read_thread()
       continue;
     }
 
-    if (rx_data_.head[0] != 'S' || rx_data_.head[1] != 'P') continue;
+    if (!rx_data_.head.is_valid()) continue;
 
     auto t = std::chrono::steady_clock::now();
 
@@ -158,6 +155,11 @@ void Gimbal::read_thread()
 
     if (!tools::check_crc16(reinterpret_cast<uint8_t *>(&rx_data_), sizeof(rx_data_))) {
       tools::logger()->debug("[Gimbal] CRC16 check failed.");
+      continue;
+    }
+
+    if (rx_data_.cmd_id != 0x0002) {
+      tools::logger()->warn("[Gimbal] Invalid cmd_id: {}", static_cast<uint8_t>(rx_data_.cmd_id));
       continue;
     }
 

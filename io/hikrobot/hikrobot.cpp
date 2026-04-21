@@ -2,6 +2,7 @@
 
 #include <libusb-1.0/libusb.h>
 
+#include "MvCameraControl.h"
 #include "tools/logger.hpp"
 
 using namespace std::chrono_literals;
@@ -13,6 +14,7 @@ HikRobot::HikRobot(double exposure_ms, double gain, const std::string & vid_pid)
 {
   set_vid_pid(vid_pid);
   if (libusb_init(NULL)) tools::logger()->warn("Unable to init libusb!");
+  MV_CC_Initialize();
 
   daemon_thread_ = std::thread{[this] {
     tools::logger()->info("HikRobot's daemon thread started.");
@@ -39,6 +41,7 @@ HikRobot::~HikRobot()
 {
   daemon_quit_ = true;
   if (daemon_thread_.joinable()) daemon_thread_.join();
+  MV_CC_Finalize();
   tools::logger()->info("HikRobot destructed.");
 }
 

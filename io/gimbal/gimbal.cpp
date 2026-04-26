@@ -106,7 +106,13 @@ void Gimbal::send(
   tx_data_.pitch_acc = pitch_acc;
   tx_data_.crc16 = tools::get_crc16(
     reinterpret_cast<uint8_t *>(&tx_data_), sizeof(tx_data_) - sizeof(tx_data_.crc16));
-
+  
+  const double RAD_TO_DEG = 180.0 / M_PI;
+  // no velocity and acceleration debug info for now
+  tools::logger()->debug(
+    "[Gimbal] Sending command: mode={}, yaw={:.2f}°, pitch={:.2f}°", 
+    tx_data_.mode, tx_data_.yaw * RAD_TO_DEG, tx_data_.pitch * RAD_TO_DEG);
+  
   try {
     serial_.write(reinterpret_cast<uint8_t *>(&tx_data_), sizeof(tx_data_));
   } catch (const std::exception & e) {

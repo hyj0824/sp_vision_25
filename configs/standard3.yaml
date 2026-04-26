@@ -7,7 +7,8 @@ classify_model: assets/tiny_resnet.onnx
 yolo11_model_path: assets/yolo11.xml
 yolov8_model_path: assets/yolov8.xml
 yolov5_model_path: assets/yolov5.xml
-device: GPU
+#device: GPU
+device: AUTO
 min_confidence: 0.8
 use_traditional: true
 
@@ -37,8 +38,8 @@ max_temp_lost_count: 15
 outpost_max_temp_lost_count: 75
 
 #####-----aimer参数-----#####
-yaw_offset: 2 # degree -2.5
-pitch_offset: 6.5 # degree 2
+yaw_offset: -1 # degree -RIGHT +LEFT
+pitch_offset: 5 # degree +up -down
 comming_angle: 55 # degree
 leaving_angle: 20 # degree
 decision_speed: 7 # rad/s
@@ -56,20 +57,18 @@ exposure_ms: 2.5
 gain: 16.9
 vid_pid: "2bdf:0001"
 
-#  1  0  0
-#  0  1  0
-#  0  0  1
+#####-----calibration-----#####
+# 重投影误差: 0.0931px
+camera_matrix: [2404.8380984519986, 0, 680.67490282444089, 0, 2405.0020867320195, 587.71084226061919, 0, 0, 1]
+distort_coeffs: [-0.039546624479632961, 0.27857291286122599, 0.002459403324063027, -0.0039781300413296427, 0]
+
+#####-----handeye_calibration-----#####
+# 手动填写 R_gimbal2imubody
 R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
 
-# 重投影误差: 0.1820px
-camera_matrix: [1785.4881526822305, 0, 672.4806478241826, 0, 1785.026019470562, 559.89603224794314, 0, 0, 1]
-distort_coeffs: [-0.076005079619881746, 0.11182817466388446, 0.0005362204787722057, -0.0027546300984895122, 0]
-
-# 相机同理想情况的偏角: yaw1.44 pitch-7.28 roll0.96 degree
-# 标定板到世界坐标系原点的水平距离: 1.13 m
-# 标定板同竖直摆放时的偏角: yaw7.61 pitch13.92 roll-0.46 degree
-R_camera2gimbal: [-0.027182119030230909, -0.12616154330853446, 0.99163723074269183, -0.99949106557517331, 0.019998323121329122, -0.024853106601381177, -0.016695575474690555, -0.99180811252093692, -0.12664093215554434]
-t_camera2gimbal: [0.13160669975045827, 0.10377721766577375, 0.024908271912914642]
+# 相机同理想情况的偏角: yaw-1.69 pitch-0.54 roll1.12 degree
+R_camera2gimbal: [0.029355471472615413, -0.0099817555536656256, 0.99951919483854201, -0.99937893719156423, 0.019207833529971019, 0.029543172289793952, -0.019493491028545713, -0.99976568439167379, -0.0094117012472882955]
+t_camera2gimbal: [0.06376002792558022, 0.027930441575340793, 0.085804590356891877]
 
 #####-----cboard参数-----#####
 quaternion_canid: 0x100
@@ -78,11 +77,7 @@ send_canid: 0xff
 can_interface: "can0"
 
 #####-----gimbal参数-----#####
-com_port: "/dev/gimbal"
-yaw_kp: 0
-yaw_kd: 0
-pitch_kp: 0
-pitch_kd: 0
+com_port: "/dev/ttyACM0"
 
 #####-----planner-----#####
 fire_thresh: 0.0035

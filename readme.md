@@ -60,19 +60,16 @@ IMU型号：使用C板内置BMI088作为IMU\
    - 其余：
     ```bash
     sudo apt install -y \
-        git \
-        g++ \
+        build-essential \
         cmake \
-        can-utils \
         libopencv-dev \
         libfmt-dev \
         libeigen3-dev \
         libspdlog-dev \
         libyaml-cpp-dev \
         libusb-1.0-0-dev \
-        nlohmann-json3-dev \
-        openssh-server \
-        screen
+        libceres-dev \
+        nlohmann-json3-dev
     ```
 
 2. 编译：

@@ -1,9 +1,13 @@
 #include <fmt/core.h>
 #include <yaml-cpp/yaml.h>
 
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <opencv2/opencv.hpp>
+#include <thread>
+#include <utility>
 
 #include "io/camera.hpp"
 // #include "io/cboard.hpp"
@@ -16,6 +20,85 @@ const std::string keys =
   "{help h usage ?  |                          | 输出命令行参数说明}"
   "{@config-path c  | configs/calibration.yaml | yaml配置文件路径 }"
   "{output-folder o |      assets/img_with_q   | 输出文件夹路径   }";
+
+namespace
+{
+class ChessboardDetector
+{
+public:
+  explicit ChessboardDetector(const cv::Size & pattern_size)
+  : pattern_size_(pattern_size), worker_(&ChessboardDetector::detect_loop, this)
+  {
+  }
+
+  ~ChessboardDetector()
+  {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      stop_ = true;
+    }
+    condition_.notify_one();
+    if (worker_.joinable()) worker_.join();
+  }
+
+  void submit(const cv::Mat & img)
+  {
+    if (img.empty()) return;
+
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      // Keep only one queued frame so slow detection cannot make capture spend every frame copying.
+      if (has_pending_) return;
+
+      pending_img_ = img.clone();
+      has_pending_ = true;
+    }
+    condition_.notify_one();
+  }
+
+  bool result(std::vector<cv::Point2f> & corners) const
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    corners = latest_corners_;
+    return latest_success_;
+  }
+
+private:
+  void detect_loop()
+  {
+    while (true) {
+      cv::Mat img;
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_.wait(lock, [this] { return stop_ || has_pending_; });
+        if (stop_) break;
+
+        img = pending_img_;
+        has_pending_ = false;
+      }
+
+      std::vector<cv::Point2f> corners;
+      auto success = cv::findChessboardCorners(img, pattern_size_, corners);
+
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        latest_corners_ = std::move(corners);
+        latest_success_ = success;
+      }
+    }
+  }
+
+  const cv::Size pattern_size_;
+  mutable std::mutex mutex_;
+  std::condition_variable condition_;
+  bool stop_ = false;
+  bool has_pending_ = false;
+  cv::Mat pending_img_;
+  std::vector<cv::Point2f> latest_corners_;
+  bool latest_success_ = false;
+  std::thread worker_;
+};
+}  // namespace
 
 void write_q(const std::string q_path, const Eigen::Quaterniond & q)
 {
@@ -33,6 +116,7 @@ void capture_loop(
   auto chessboard_corner_cols = yaml["chessboard_corner_cols"].as<int>();
   auto chessboard_corner_rows = yaml["chessboard_corner_rows"].as<int>();
   cv::Size pattern_size(chessboard_corner_cols, chessboard_corner_rows);
+  ChessboardDetector chessboard_detector(pattern_size);
 
   // io::CBoard cboard(config_path);
   io::Gimbal gimbal(config_path);
@@ -43,17 +127,21 @@ void capture_loop(
   int count = 0;
   while (true) {
     camera.read(img, timestamp);
+    if (img.empty()) continue;
+
     Eigen::Quaterniond q = gimbal.q(timestamp);
 
     // 在图像上显示欧拉角，用来判断imuabs系的xyz正方向，同时判断imu是否存在零漂
     auto img_with_ypr = img.clone();
+    chessboard_detector.submit(img);
+
     Eigen::Vector3d zyx = tools::eulers(q, 2, 1, 0) * 57.3;  // degree
     tools::draw_text(img_with_ypr, fmt::format("Z {:.2f}", zyx[0]), {40, 40}, {0, 0, 255});
     tools::draw_text(img_with_ypr, fmt::format("Y {:.2f}", zyx[1]), {40, 80}, {0, 0, 255});
     tools::draw_text(img_with_ypr, fmt::format("X {:.2f}", zyx[2]), {40, 120}, {0, 0, 255});
 
     std::vector<cv::Point2f> corners_2d;
-    auto success = cv::findChessboardCorners(img, pattern_size, corners_2d);
+    auto success = chessboard_detector.result(corners_2d);
     cv::drawChessboardCorners(img_with_ypr, pattern_size, corners_2d, success);  // 显示识别结果
     cv::resize(img_with_ypr, img_with_ypr, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
 

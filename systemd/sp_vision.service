@@ -1,0 +1,19 @@
+[Unit]
+Description=SP Vision Bringup
+After=multi-user.target
+
+[Service]
+Type=simple
+User=artinx
+WorkingDirectory=/opt/sp_vision_25
+Environment=USER_HOME=/home/artinx
+Environment=PROJECT_DIR=/opt/sp_vision_25
+Environment=EXECUTABLE=/opt/sp_vision_25/build/standard_mpc
+Environment=CONFIG_PATH=/opt/sp_vision_25/configs/standard3.yaml
+ExecStart=/opt/sp_vision_25/systemd/start_sp_vision.sh
+Restart=on-failure
+RestartSec=2
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

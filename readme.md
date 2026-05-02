@@ -121,27 +121,35 @@ IMU型号：使用C板内置BMI088作为IMU\
         - `buff_engine_path: assets/yolo11_buff_int8.engine`
         - 模型输出需保持 6 个关键点布局（即 `1x17x8400` 或等价转置）。
 
-4. 注册自启：
-    1. 确保已安装`screen`:
+4. systemd 自启：
+    1. 建议将项目目录软链接到固定路径，便于 service 文件保持稳定：
+        ```bash
+        sudo ln -sfn /home/artinx/workspace/sp_vision_25 /opt/sp_vision_25
         ```
-        sudo apt install screen
+    2. 按需调整启动脚本和Service文件中的设置：
+        建议以非 root 用户运行视觉程序，修改要启动的用户身份、视觉程序、配置文件；service 负责拉起 `start_sp_vision.sh`。启动脚本完成相关环境的配置后，会 exec 成视觉程序。
+    3. 安装 systemd unit：
+        ```bash
+        chmod +x /opt/sp_vision_25/systemd/start_sp_vision.sh
+        sudo cp /opt/sp_vision_25/systemd/sp_vision.service /etc/systemd/system/sp_vision.service
+        sudo systemctl daemon-reload
         ```
-    2. 创建`.desktop`文件:
+    4. 启用并启动服务：
+        ```bash
+        sudo systemctl enable sp_vision.service
+        sudo systemctl start sp_vision.service
         ```
-        mkdir ~/.config/autostart/
-        touch ~/.config/autostart/sp_vision.desktop
+    5. 查看状态和日志：
+        ```bash
+        systemctl status sp_vision.service
+        journalctl -u sp_vision.service -f
         ```
-    3. 在该文件中写入:
-        ```
-        [Desktop Entry]
-        Type=Application
-        Exec=/home/rm/Desktop/sp_vision_25/autostart.sh
-        Name=sp_vision
-        ```
-        注: [Exec](https://specifications.freedesktop.org/desktop-entry-spec/desktop-entry-spec-latest.html)必须为绝对路径.
-    4. 确保`autostart.sh`有可执行权限:
-        ```
-        chmod +x autostart.sh
+        程序自身日志也会写入 `/opt/sp_vision_25/logs/`。
+    6. 停止、重启或取消自启：
+        ```bash
+        sudo systemctl stop sp_vision.service
+        sudo systemctl restart sp_vision.service
+        sudo systemctl disable sp_vision.service
         ```
 
 5. USB2CAN设置（可选）

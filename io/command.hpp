@@ -3,6 +3,13 @@
 
 namespace io
 {
+enum ShootMode
+{
+  left_shoot,
+  right_shoot,
+  both_shoot
+};
+
 struct Command
 {
   bool control;

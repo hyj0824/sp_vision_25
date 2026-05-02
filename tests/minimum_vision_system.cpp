@@ -3,7 +3,7 @@
 #include <thread>
 
 #include "io/camera.hpp"
-#include "io/dm_imu/dm_imu.hpp"
+#include "io/gimbal/gimbal.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/multithread/mt_detector.hpp"
 #include "tasks/auto_aim/shooter.hpp"
@@ -32,7 +32,7 @@ int main(int argc, char * argv[])
   tools::Exiter exiter;
   tools::Plotter plotter;
   io::Camera camera(config_path);
-  io::DM_IMU dm_imu;
+  io::Gimbal gimbal(config_path);
 
   auto_aim::multithread::MultiThreadDetector detector(config_path);
   auto_aim::Solver solver(config_path);
@@ -56,7 +56,7 @@ int main(int argc, char * argv[])
   while (!exiter.exit()) {
     auto [img, armors, t] = detector.debug_pop();
 
-    Eigen::Quaterniond q = dm_imu.imu_at(t);
+    Eigen::Quaterniond q = gimbal.q(t);
 
     solver.set_R_gimbal2world(q);
 
@@ -64,7 +64,8 @@ int main(int argc, char * argv[])
 
     auto targets = tracker.track(armors, t);
 
-    auto command = aimer.aim(targets, t, 22);
+    auto gs = gimbal.state();
+    auto command = aimer.aim(targets, t, gs.bullet_speed);
 
     shooter.shoot(command, aimer, targets, gimbal_pos);
 

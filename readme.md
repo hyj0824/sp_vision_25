@@ -48,8 +48,8 @@ https://github.com/user-attachments/assets/606c2907-2f11-4392-b3fe-7ee4b7b6fd29
 相机型号：海康MV-CS016-10UC\
 镜头型号：海康官方6mm镜头\
 下位机型号：RoboMaster开发板C型（STM32F407）\
-IMU型号：使用C板内置BMI088作为IMU\
-通信方式：USB2CAN（旧）、MicroUSB虚拟串口（新）\
+IMU型号：使用下位机内置IMU，通过串口上传姿态\
+通信方式：MicroUSB虚拟串口\
 辅助工具：NoMachine（远程桌面）、PlotJuggler（绘制曲线图）
 
 ### 3.2 编译方式
@@ -152,17 +152,7 @@ IMU型号：使用C板内置BMI088作为IMU\
         sudo systemctl disable sp_vision.service
         ```
 
-5. USB2CAN设置（可选）
-    1. 创建`.rules`文件:
-        ```
-        sudo touch /etc/udev/rules.d/99-can-up.rules
-        ```
-    2. 在该文件中写入:
-        ```
-        ACTION=="add", KERNEL=="can0", RUN+="/sbin/ip link set can0 up type can bitrate 1000000"
-        ACTION=="add", KERNEL=="can1", RUN+="/sbin/ip link set can1 up type can bitrate 1000000"
-
-6. 使用 Intel OpenVINO GPU 推理（旧平台可选）
+5. 使用 Intel OpenVINO GPU 推理（旧平台可选）
     ```
     mkdir neo  
     cd neo  
@@ -181,7 +171,7 @@ IMU型号：使用C板内置BMI088作为IMU\
     ```
     注：如果使用 GPU 异步推理（async-infer），最高显示分辨率限制为 1920×1080 (24Hz)
 
-7. 串口设置
+6. 串口设置
     1. 授予权限
         ```
         sudo usermod -a -G dialout $USER
@@ -253,9 +243,9 @@ sp_vision_25
 │   ├── camera_detect_test.cpp    // 识别器测试程序（工业相机）
 │   ├── camera_test.cpp           // 相机测试程序
 │   ├── camera_thread_test.cpp    // 相机线程测试程序
-│   ├── cboard_test.cpp           // C板测试程序
+│   ├── gimbal_state_test.cpp     // 云台状态测试程序
 │   ├── detector_video_test.cpp   // 识别器测试程序（视频）
-│   ├── dm_test.cpp               // 达妙IMU测试程序
+│   ├── gimbal_pose_test.cpp      // 云台姿态测试程序
 │   ├── fire_test.cpp             // 开火测试程序
 │   ├── gimbal_response_test.cpp  // 云台响应测试程序
 │   ├── gimbal_test.cpp           // 云台通信测试程序

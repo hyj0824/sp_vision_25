@@ -86,13 +86,13 @@ int main(int argc, char * argv[])
 
     auto command = aimer.aim(target_copy, timestamp, 22, false);
 
-    // cboard.send(command);
+    // gimbal.send(command);
 
     // -------------- 调试输出 --------------
 
     nlohmann::json data;
 
-    // data["bullet_speed"] = cboard.bullet_speed;
+    // data["bullet_speed"] = gimbal.state().bullet_speed;
 
     // buff原始观测数据
     if (power_runes.has_value()) {

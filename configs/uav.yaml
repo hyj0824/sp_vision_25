@@ -54,12 +54,6 @@ max_side_ratio: 1.5
 max_rectangular_error: 25 # degree
 min_confidence: 0.8
 
-#####-----cboard参数-----#####
-quaternion_canid: 0x001
-bullet_speed_canid: 0x110
-send_canid: 0xff
-can_interface: "can0"
-
 #####-----tracker参数-----#####
 min_detect_count: 5
 max_temp_lost_count: 15

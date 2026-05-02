@@ -19,11 +19,14 @@
 #include <Eigen/Geometry>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <thread>
 #include <tuple>
 
+#include "io/command.hpp"
 #include "serial/serial.h"
 #include "tools/crc.hpp"
 #include "tools/thread_safe_queue.hpp"
@@ -94,12 +97,12 @@ enum class GimbalMode
 
 struct GimbalState
 {
-  float yaw;
-  float yaw_vel;
-  float pitch;
-  float pitch_vel;
-  float bullet_speed;
-  uint16_t bullet_count;
+  float yaw = 0;
+  float yaw_vel = 0;
+  float pitch = 0;
+  float pitch_vel = 0;
+  float bullet_speed = 0;
+  uint16_t bullet_count = 0;
 };
 
 class Gimbal
@@ -117,27 +120,37 @@ public:
   void send(
     bool control, bool fire, float yaw, float yaw_vel, float yaw_acc, float pitch, float pitch_vel,
     float pitch_acc);
-
-  void send(io::VisionToGimbal VisionToGimbal);
+  void send(const Command & command);
 
 private:
+  enum class ReadStatus { OK, TIMEOUT, INVALID, ERROR };
+
   serial::Serial serial_;
+  mutable std::shared_mutex serial_mutex_;
+  std::atomic<bool> serial_available_ = false;
+  std::atomic<uint64_t> dropped_tx_count_ = 0;
 
   std::thread thread_;
   std::atomic<bool> quit_ = false;
   mutable std::mutex mutex_;
 
   GimbalToVision rx_data_;
-  VisionToGimbal tx_data_;
+  uint64_t bad_rx_packet_count_ = 0;
 
   GimbalMode mode_ = GimbalMode::IDLE;
   GimbalState state_;
   tools::ThreadSafeQueue<std::tuple<Eigen::Quaterniond, std::chrono::steady_clock::time_point>>
     queue_{1000};
 
-  bool read(uint8_t * buffer, size_t size);
+  bool write(const uint8_t * buffer, size_t size);
+  ReadStatus read(uint8_t * buffer, size_t size);
+  ReadStatus read_header(PacketHead & head);
+  ReadStatus read_packet(std::chrono::steady_clock::time_point & timestamp);
   void read_thread();
   void reconnect();
+  void log_bad_rx_packet(const std::string & reason);
+  void on_valid_rx_packet();
+  void mark_serial_unavailable(const char * operation, const std::string & reason);
 };
 
 }  // namespace io

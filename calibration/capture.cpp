@@ -10,7 +10,6 @@
 #include <utility>
 
 #include "io/camera.hpp"
-// #include "io/cboard.hpp"
 #include "io/gimbal/gimbal.hpp"
 #include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
@@ -109,8 +108,7 @@ void write_q(const std::string q_path, const Eigen::Quaterniond & q)
   q_file.close();
 }
 
-void capture_loop(
-  const std::string & config_path, const std::string & can, const std::string & output_folder)
+void capture_loop(const std::string & config_path, const std::string & output_folder)
 {
   auto yaml = YAML::LoadFile(config_path);
   auto chessboard_corner_cols = yaml["chessboard_corner_cols"].as<int>();
@@ -118,7 +116,6 @@ void capture_loop(
   cv::Size pattern_size(chessboard_corner_cols, chessboard_corner_rows);
   ChessboardDetector chessboard_detector(pattern_size);
 
-  // io::CBoard cboard(config_path);
   io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
   cv::Mat img;
@@ -162,7 +159,7 @@ void capture_loop(
     tools::logger()->info("[{}] Saved in {}", count, output_folder);
   }
 
-  // 离开该作用域时，camera和cboard会自动关闭
+  // 离开该作用域时，camera和gimbal会自动关闭
 }
 
 int main(int argc, char * argv[])
@@ -180,7 +177,7 @@ int main(int argc, char * argv[])
   std::filesystem::create_directory(output_folder);
 
   // 主循环，保存图片和对应四元数
-  capture_loop(config_path, "can0", output_folder);
+  capture_loop(config_path, output_folder);
 
   tools::logger()->warn("注意四元数输出顺序为wxyz");
 

@@ -34,12 +34,16 @@ private:
   std::atomic<bool> daemon_quit_;
 
   void * handle_;
+  bool device_opened_;
+  bool grabbing_started_;
   std::thread capture_thread_;
   std::atomic<bool> capturing_;
   std::atomic<bool> capture_quit_;
   tools::ThreadSafeQueue<CameraData> queue_;
 
   int vid_, pid_;
+  std::chrono::steady_clock::time_point last_capture_warn_;
+  std::chrono::steady_clock::time_point last_usb_warn_;
 
   void capture_start();
   void capture_stop();
@@ -48,7 +52,7 @@ private:
   void set_enum_value(const std::string & name, unsigned int value);
 
   void set_vid_pid(const std::string & vid_pid);
-  void reset_usb() const;
+  void reset_usb();
 };
 
 }  // namespace io

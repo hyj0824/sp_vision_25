@@ -23,8 +23,8 @@
 #include "tools/thread_pool.hpp"
 
 const std::string keys =
-  "{help h usage ? |                        | 输出命令行参数说明}"
-  "{@config-path   | configs/ascento.yaml | 位置参数，yaml配置文件路径 }";
+  "{help h usage ? |                   | 输出命令行参数说明}"
+  "{@config-path   | configs/demo.yaml | 位置参数，yaml配置文件路径 }";
 
 tools::OrderedQueue frame_queue;
 
@@ -68,9 +68,9 @@ int main(int argc, char * argv[])
 
   io::Camera camera(config_path);
   int num_yolo_thread = 8;
-  auto yolos = tools::create_yolov8s(config_path, num_yolo_thread, true);
-  // auto yolos = tools::create_yolo11s(config_path, num_yolo_thread, true);
+  auto yolos = tools::create_yolos(config_path, num_yolo_thread, true);
   std::vector<bool> yolo_used(num_yolo_thread, false);
+  std::mutex yolo_mutex;
   tools::ThreadPool thread_pool(num_yolo_thread);
 
   cv::Mat img;
@@ -93,22 +93,26 @@ int main(int argc, char * argv[])
     frame_id++;
 
     // 将处理任务提交到线程池
-    std::mutex yolo_mutex;
-    thread_pool.enqueue([&, frame_id, t] {
+    auto frame_img = img.clone();
+    thread_pool.enqueue([&, frame_id, t, frame_img] {
       auto_aim::YOLO * yolo = nullptr;
       int yolo_id = -1;
-      for (int i = 0; i < num_yolo_thread; i++) {
-        if (!yolo_used[i]) {
-          yolo_used[i] = true;
-          yolo = &yolos[i];
-          yolo_id = i;
-          break;
+      {
+        std::lock_guard<std::mutex> lock(yolo_mutex);
+        for (int i = 0; i < num_yolo_thread; i++) {
+          if (!yolo_used[i]) {
+            yolo_used[i] = true;
+            yolo = &yolos[i];
+            yolo_id = i;
+            break;
+          }
         }
       }
       if (yolo) {
-        tools::Frame frame{frame_id, img.clone(), t};
+        tools::Frame frame{frame_id, frame_img, t};
         detect_frame(std::move(frame), *yolo);
 
+        std::lock_guard<std::mutex> lock(yolo_mutex);
         yolo_used[yolo_id] = false;
       }
     });

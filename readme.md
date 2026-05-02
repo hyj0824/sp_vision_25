@@ -55,7 +55,8 @@ IMU型号：使用C板内置BMI088作为IMU\
 ### 3.2 编译方式
 1. 安装依赖项：
    - [MindVision SDK](https://mindvision.com.cn/category/software/sdk-installation-package/)或[HikRobot SDK](https://www.hikrobotics.com/cn2/source/support/software/MVS_STD_GML_V2.1.2_231116.zip)
-   - [OpenVINO](https://docs.openvino.ai/2024/get-started/install-openvino/install-openvino-archive-linux.html)
+   - TensorRT（Jetson 平台建议使用 JetPack 自带版本）
+   - CUDA Toolkit（Jetson 平台建议使用 JetPack 自带版本）
    - [Ceres](http://ceres-solver.org/installation.html)
    - 其余：
     ```bash
@@ -74,14 +75,47 @@ IMU型号：使用C板内置BMI088作为IMU\
 
 2. 编译：
     ```bash
-    cmake -B build
-    make -C build/ -j`nproc`
+    cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+    cmake --build build -j$(nproc)
+    ```
+
+    可以通过开关控制依赖 OpenVINO 的模块（默认均为 OFF）
+
+    启用能量机关模块 auto_buff
+    ```bash
+    cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_AUTO_BUFF=ON
+    cmake --build build -j$(nproc)
+    ```
+
+    启用哨兵全向感知模块 omniperception
+    ```bash
+    cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_OMNIPERCEPTION=ON
+    cmake --build build -j$(nproc)
+    ```
+
+    若使用 clangd，建议在项目根目录暴露编译数据库：
+    ```bash
+    ln -sfn build/compile_commands.json compile_commands.json
     ```
 
 3. 运行demo:
     ```bash
     ./build/auto_aim_test
     ```
+
+    - `auto_aim` 迁移了 `yolov5` 的两条执行路径：
+        - 单线程检测路径（`YOLO::detect`）。
+        - 多线程检测路径（`multithread::MultiThreadDetector`，`push + pop/debug_pop`）。
+        - 若按对外入口函数计，共 3 个入口：`YOLO::detect`、`MultiThreadDetector::pop`、`MultiThreadDetector::debug_pop`（后两者共享同一后处理流程）。
+    - `auto_aim` 中旧的 `yolov8/yolo11` 实现已移除，不再可选。
+    - `auto_buff`（含 `yolo11_buff`）属于独立模块，尚未迁移到 TensorRT（可通过 `BUILD_AUTO_BUFF=OFF` 关闭）。
+    - 首次运行若不存在 `yolov5_engine_path`，程序会尝试由 ONNX 自动构建 engine。TensorRT engine 与 GPU/平台绑定，不建议提交到仓库。
+    - 建议在配置中使用：
+        - `yolov5_model_path: assets/0526.onnx`
+        - `yolov5_engine_path: assets/0526.engine`
+        - `trt_fp16: true`
+        - `trt_force_rebuild: false`
+        - `trt_workspace_mb: 1024`
 
 4. 注册自启：
     1. 确保已安装`screen`:
@@ -116,7 +150,7 @@ IMU型号：使用C板内置BMI088作为IMU\
         ACTION=="add", KERNEL=="can0", RUN+="/sbin/ip link set can0 up type can bitrate 1000000"
         ACTION=="add", KERNEL=="can1", RUN+="/sbin/ip link set can1 up type can bitrate 1000000"
 
-6. 使用GPU推理（可选）
+6. 使用 Intel OpenVINO GPU 推理（旧平台可选）
     ```
     mkdir neo  
     cd neo  

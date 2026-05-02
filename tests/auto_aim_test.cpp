@@ -1,6 +1,7 @@
 #include <fmt/core.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
@@ -34,6 +35,7 @@ int main(int argc, char * argv[])
   auto config_path = cli.get<std::string>("config-path");
   auto start_index = cli.get<int>("start-index");
   auto end_index = cli.get<int>("end-index");
+  const bool enable_visualization = std::getenv("DISPLAY") != nullptr;
 
   tools::Plotter plotter;
   tools::Exiter exiter;
@@ -43,7 +45,7 @@ int main(int argc, char * argv[])
   cv::VideoCapture video(video_path);
   std::ifstream text(text_path);
 
-  auto_aim::YOLO yolo(config_path);
+  auto_aim::YOLO yolo(config_path, enable_visualization);
   auto_aim::Solver solver(config_path);
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Aimer aimer(config_path);
@@ -188,10 +190,12 @@ int main(int argc, char * argv[])
 
     plotter.plot(data);
 
-    cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
-    cv::imshow("reprojection", img);
-    auto key = cv::waitKey(30);
-    if (key == 'q') break;
+    if (enable_visualization) {
+      cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
+      cv::imshow("reprojection", img);
+      auto key = cv::waitKey(30);
+      if (key == 'q') break;
+    }
   }
 
   return 0;

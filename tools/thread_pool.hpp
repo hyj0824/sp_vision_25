@@ -3,9 +3,11 @@
 
 #include <condition_variable>
 #include <functional>
+#include <list>
 #include <mutex>
 #include <queue>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "tasks/auto_aim/yolo.hpp"
@@ -22,24 +24,15 @@ struct Frame
   std::list<auto_aim::Armor> armors;
 };
 
-inline std::vector<auto_aim::YOLO> create_yolo11s(
-  const std::string & config_path, int numebr, bool debug)
+inline std::vector<auto_aim::YOLO> create_yolos(
+  const std::string & config_path, int number, bool debug)
 {
-  std::vector<auto_aim::YOLO> yolo11s;
-  for (int i = 0; i < numebr; i++) {
-    yolo11s.push_back(auto_aim::YOLO(config_path, debug));
+  std::vector<auto_aim::YOLO> yolos;
+  yolos.reserve(static_cast<std::size_t>(number));
+  for (int i = 0; i < number; i++) {
+    yolos.emplace_back(config_path, debug);
   }
-  return yolo11s;
-}
-
-inline std::vector<auto_aim::YOLO> create_yolov8s(
-  const std::string & config_path, int numebr, bool debug)
-{
-  std::vector<auto_aim::YOLO> yolov8s;
-  for (int i = 0; i < numebr; i++) {
-    yolov8s.push_back(auto_aim::YOLO(config_path, debug));
-  }
-  return yolov8s;
+  return yolos;
 }
 
 class OrderedQueue

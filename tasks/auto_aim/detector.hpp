@@ -21,8 +21,6 @@ public:
 
   bool detect(Armor & armor, const cv::Mat & bgr_img);
 
-  friend class YOLOV8;
-
 private:
   Classifier classifier_;
 

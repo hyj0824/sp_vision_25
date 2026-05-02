@@ -144,7 +144,7 @@ Armor::Armor(
   }
 }
 
-// YOLOV5构造函数
+// YOLO keypoint constructor
 Armor::Armor(
   int color_id, int num_id, float confidence, const cv::Rect & box,
   std::vector<cv::Point2f> armor_keypoints)
@@ -179,7 +179,7 @@ Armor::Armor(
   type = num_id == 1 ? ArmorType::big : ArmorType::small;
 }
 
-// YOLOV5+ROI构造函数
+// YOLO keypoint + ROI constructor
 Armor::Armor(
   int color_id, int num_id, float confidence, const cv::Rect & box,
   std::vector<cv::Point2f> armor_keypoints, cv::Point2f offset)

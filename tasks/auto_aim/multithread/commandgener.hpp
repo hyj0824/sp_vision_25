@@ -1,12 +1,16 @@
 #ifndef AUTO_AIM_MULTITHREAD__HPP
 #define AUTO_AIM_MULTITHREAD__HPP
 
+#include <chrono>
+#include <condition_variable>
+#include <list>
+#include <mutex>
 #include <optional>
+#include <thread>
 
 #include "io/cboard.hpp"
 #include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/tracker.hpp"
-#include "tasks/omniperception/decider.hpp"
 #include "tools/plotter.hpp"
 
 namespace auto_aim

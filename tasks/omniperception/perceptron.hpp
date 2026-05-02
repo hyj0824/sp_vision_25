@@ -26,7 +26,7 @@ public:
 
   std::vector<DetectionResult> get_detection_queue();
 
-  void parallel_infer(io::USBCamera * cam, std::shared_ptr<auto_aim::YOLO> & yolo_parallel);
+  void parallel_infer(io::USBCamera * cam, std::shared_ptr<auto_aim::YOLO> & yolo);
 
 private:
   std::vector<std::thread> threads_;

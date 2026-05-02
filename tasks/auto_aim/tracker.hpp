@@ -5,11 +5,13 @@
 #include <chrono>
 #include <list>
 #include <string>
+#include <tuple>
+#include <vector>
 
 #include "armor.hpp"
 #include "solver.hpp"
 #include "target.hpp"
-#include "tasks/omniperception/perceptron.hpp"
+#include "tasks/omniperception/detection.hpp"
 #include "tools/thread_safe_queue.hpp"
 
 namespace auto_aim

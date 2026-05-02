@@ -1,6 +1,9 @@
 .vscode/
 .github/
 .cache/
+.codex
+compile_commands.json
+*.engine
 build/
 Camera/
 logs/

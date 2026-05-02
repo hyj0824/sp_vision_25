@@ -79,7 +79,7 @@ IMU型号：使用C板内置BMI088作为IMU\
     cmake --build build -j$(nproc)
     ```
 
-    可以通过开关控制依赖 OpenVINO 的模块（默认均为 OFF）
+    可以通过开关控制可选模块（默认均为 OFF）
 
     启用能量机关模块 auto_buff
     ```bash
@@ -108,7 +108,7 @@ IMU型号：使用C板内置BMI088作为IMU\
         - 多线程检测路径（`multithread::MultiThreadDetector`，`push + pop/debug_pop`）。
         - 若按对外入口函数计，共 3 个入口：`YOLO::detect`、`MultiThreadDetector::pop`、`MultiThreadDetector::debug_pop`（后两者共享同一后处理流程）。
     - `auto_aim` 中旧的 `yolov8/yolo11` 实现已移除，不再可选。
-    - `auto_buff`（含 `yolo11_buff`）属于独立模块，尚未迁移到 TensorRT（可通过 `BUILD_AUTO_BUFF=OFF` 关闭）。
+    - `auto_buff`（含 `yolo11_buff`）已迁移到 TensorRT（可通过 `BUILD_AUTO_BUFF=OFF` 关闭）。
     - 首次运行若不存在 `yolov5_engine_path`，程序会尝试由 ONNX 自动构建 engine。TensorRT engine 与 GPU/平台绑定，不建议提交到仓库。
     - 建议在配置中使用：
         - `yolov5_model_path: assets/0526.onnx`
@@ -116,6 +116,10 @@ IMU型号：使用C板内置BMI088作为IMU\
         - `trt_fp16: true`
         - `trt_force_rebuild: false`
         - `trt_workspace_mb: 1024`
+    - `auto_buff` 建议在配置中使用：
+        - `buff_model_path: assets/yolo11_buff_int8.onnx`
+        - `buff_engine_path: assets/yolo11_buff_int8.engine`
+        - 模型输出需保持 6 个关键点布局（即 `1x17x8400` 或等价转置）。
 
 4. 注册自启：
     1. 确保已安装`screen`:

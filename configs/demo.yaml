@@ -91,6 +91,8 @@ Q_pitch: [9e6,0]
 R_pitch: [1]
 
 #####-----buff_detector参数-----#####
+buff_model_path: assets/yolo11_buff_int8.onnx
+buff_engine_path: assets/yolo11_buff_int8.engine
 detect:
   contrast: 1
   brightness: 

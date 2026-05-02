@@ -10,7 +10,6 @@
 
 #include "io/camera.hpp"
 #include "io/gimbal/gimbal.hpp"
-#include "io/ros2/ros2.hpp"
 #include "io/usbcamera/usbcamera.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/shooter.hpp"
@@ -46,7 +45,6 @@ int main(int argc, char * argv[])
   }
   auto config_path = cli.get<std::string>(0);
 
-  io::ROS2 ros2;
   io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
   io::USBCamera usbcam1("video0", config_path);
@@ -79,7 +77,7 @@ int main(int argc, char * argv[])
 
     auto armors = yolo.detect(img);
 
-    decider.get_invincible_armor(ros2.subscribe_enemy_status());
+    decider.get_invincible_armor({});
 
     decider.armor_filter(armors);
 
@@ -115,11 +113,6 @@ int main(int argc, char * argv[])
     // command.shoot = false;
 
     gimbal.send(command);
-
-    /// ROS2通信
-    Eigen::Vector4d target_info = decider.get_target_info(armors, targets);
-
-    ros2.publish(target_info);
   }
 
   return 0;

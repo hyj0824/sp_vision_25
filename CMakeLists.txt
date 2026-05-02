@@ -17,7 +17,7 @@ find_package(yaml-cpp REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
 option(BUILD_AUTO_BUFF "Build auto_buff module (requires TensorRT)" OFF)
-option(BUILD_OMNIPERCEPTION "Build omniperception module (requires OpenVINO)" OFF)
+option(BUILD_OMNIPERCEPTION "Build omniperception module (requires TensorRT)" OFF)
 
 include_directories(${EIGEN3_INCLUDE_DIR})
 include_directories(${OpenCV_INCLUDE_DIRS})
@@ -118,38 +118,16 @@ target_link_libraries(planner_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim too
 add_executable(planner_test_offline tests/planner_test_offline.cpp)
 target_link_libraries(planner_test_offline ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 
-# 检查 ROS 环境
-find_package(ament_cmake QUIET)
-find_package(rclcpp QUIET)
-find_package(std_msgs QUIET)
-find_package(rosidl_typesupport_cpp QUIET)
-find_package(sp_msgs QUIET)
-# 只有在找到 ROS 环境时才会添加 ROS 相关目标
-if(ament_cmake_FOUND AND rclcpp_FOUND AND std_msgs_FOUND AND rosidl_typesupport_cpp_FOUND AND sp_msgs_FOUND)
-  # 编译 publish/subscribe 测试
-  add_executable(publish_test tests/publish_test.cpp)
-  add_executable(subscribe_test tests/subscribe_test.cpp)
-  add_executable(topic_loop_test tests/topic_loop_test.cpp)
+if(BUILD_OMNIPERCEPTION)
+  add_executable(sentry src/sentry.cpp)
+  add_executable(sentry_bp src/sentry_bp.cpp)
+  add_executable(sentry_debug src/sentry_debug.cpp)
+  add_executable(sentry_multithread src/sentry_multithread.cpp)
 
-  target_link_libraries(publish_test ${OpenCV_LIBS} fmt::fmt tools io auto_aim)
-  target_link_libraries(subscribe_test ${OpenCV_LIBS} fmt::fmt tools io)
-  target_link_libraries(topic_loop_test ${OpenCV_LIBS} fmt::fmt tools io)
-
-  if(BUILD_OMNIPERCEPTION)
-    # 仅在启用 omniperception 时编译 sentry 相关目标
-    # sentry 相关目标依赖 omniperception 模块以及 ROS
-    add_executable(sentry src/sentry.cpp)
-    add_executable(sentry_bp src/sentry_bp.cpp)
-    add_executable(sentry_debug src/sentry_debug.cpp)
-    add_executable(sentry_multithread src/sentry_multithread.cpp)
-
-    target_link_libraries(sentry ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
-    target_link_libraries(sentry_bp ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
-    target_link_libraries(sentry_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
-    target_link_libraries(sentry_multithread ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
-  else()
-    message(STATUS "BUILD_OMNIPERCEPTION=OFF, skipping sentry targets that depend on omniperception.")
-  endif()
+  target_link_libraries(sentry ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
+  target_link_libraries(sentry_bp ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
+  target_link_libraries(sentry_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
+  target_link_libraries(sentry_multithread ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
 else()
-  message(STATUS "ROS2 environment not found, skipping ROS2-related code.")
+  message(STATUS "BUILD_OMNIPERCEPTION=OFF, skipping sentry targets that depend on omniperception.")
 endif()

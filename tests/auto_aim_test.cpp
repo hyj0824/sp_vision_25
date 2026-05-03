@@ -1,10 +1,20 @@
 #include <fmt/core.h>
 
+#include <algorithm>
 #include <chrono>
+#include <condition_variable>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
+#include <list>
+#include <mutex>
 #include <nlohmann/json.hpp>
+#include <numeric>
 #include <opencv2/opencv.hpp>
+#include <queue>
+#include <string>
+#include <thread>
+#include <vector>
 
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/solver.hpp"
@@ -16,11 +26,187 @@
 #include "tools/math_tools.hpp"
 #include "tools/plotter.hpp"
 
+namespace
+{
+struct BenchmarkFrame
+{
+  int frame_count;
+  cv::Mat img;
+  double t;
+  double w;
+  double x;
+  double y;
+  double z;
+};
+
+struct BenchmarkTiming
+{
+  double core_s = 0;
+  double yolo_s = 0;
+  double tracker_s = 0;
+  double aimer_s = 0;
+};
+
+struct DetectionResult
+{
+  std::size_t frame_index;
+  std::list<auto_aim::Armor> armors;
+  double yolo_s;
+  std::chrono::steady_clock::time_point start;
+};
+
+double percentile(const std::vector<double> & sorted_values, double p)
+{
+  if (sorted_values.empty()) return 0;
+
+  const auto index =
+    static_cast<std::size_t>(p * static_cast<double>(sorted_values.size() - 1));
+  return sorted_values[index];
+}
+
+std::vector<BenchmarkFrame> load_benchmark_frames(
+  cv::VideoCapture & video, std::ifstream & text, int start_index, int end_index)
+{
+  std::vector<BenchmarkFrame> frames;
+  if (!video.isOpened() || !text.is_open()) return frames;
+
+  video.set(cv::CAP_PROP_POS_FRAMES, start_index);
+  for (int i = 0; i < start_index; i++) {
+    double t, w, x, y, z;
+    text >> t >> w >> x >> y >> z;
+  }
+
+  for (int frame_count = start_index;; frame_count++) {
+    if (end_index > 0 && frame_count > end_index) break;
+
+    cv::Mat img;
+    video.read(img);
+    if (img.empty()) break;
+
+    double t, w, x, y, z;
+    if (!(text >> t >> w >> x >> y >> z)) break;
+
+    frames.push_back({frame_count, img.clone(), t, w, x, y, z});
+  }
+
+  return frames;
+}
+
+BenchmarkTiming run_benchmark_frame(
+  const BenchmarkFrame & frame, auto_aim::YOLO & yolo, auto_aim::Solver & solver,
+  auto_aim::Tracker & tracker, auto_aim::Aimer & aimer, io::Command & last_command,
+  std::chrono::steady_clock::time_point t0)
+{
+  auto timestamp = t0 + std::chrono::microseconds(static_cast<int64_t>(frame.t * 1e6));
+
+  auto core_start = std::chrono::steady_clock::now();
+  auto yolo_start = std::chrono::steady_clock::now();
+  auto armors = yolo.detect(frame.img, frame.frame_count);
+
+  auto tracker_start = std::chrono::steady_clock::now();
+  solver.set_R_gimbal2world({frame.w, frame.x, frame.y, frame.z});
+  auto targets = tracker.track(armors, timestamp);
+
+  auto aimer_start = std::chrono::steady_clock::now();
+  auto command = aimer.aim(targets, timestamp, 27, false);
+
+  if (
+    !targets.empty() && aimer.debug_aim_point.valid &&
+    std::abs(command.yaw - last_command.yaw) * 57.3 < 2)
+    command.shoot = true;
+
+  if (command.control) last_command = command;
+
+  auto finish = std::chrono::steady_clock::now();
+  return {
+    tools::delta_time(finish, core_start),
+    tools::delta_time(tracker_start, yolo_start),
+    tools::delta_time(aimer_start, tracker_start),
+    tools::delta_time(finish, aimer_start)};
+}
+
+BenchmarkTiming run_benchmark_backend(
+  const BenchmarkFrame & frame, std::list<auto_aim::Armor> & armors, double yolo_s,
+  auto_aim::Solver & solver, auto_aim::Tracker & tracker, auto_aim::Aimer & aimer,
+  io::Command & last_command, std::chrono::steady_clock::time_point t0)
+{
+  auto timestamp = t0 + std::chrono::microseconds(static_cast<int64_t>(frame.t * 1e6));
+
+  auto backend_start = std::chrono::steady_clock::now();
+  solver.set_R_gimbal2world({frame.w, frame.x, frame.y, frame.z});
+
+  auto tracker_start = std::chrono::steady_clock::now();
+  auto targets = tracker.track(armors, timestamp);
+
+  auto aimer_start = std::chrono::steady_clock::now();
+  auto command = aimer.aim(targets, timestamp, 27, false);
+
+  if (
+    !targets.empty() && aimer.debug_aim_point.valid &&
+    std::abs(command.yaw - last_command.yaw) * 57.3 < 2)
+    command.shoot = true;
+
+  if (command.control) last_command = command;
+
+  auto finish = std::chrono::steady_clock::now();
+  return {
+    yolo_s + tools::delta_time(finish, backend_start),
+    yolo_s,
+    tools::delta_time(aimer_start, tracker_start),
+    tools::delta_time(finish, aimer_start)};
+}
+
+void add_timing(BenchmarkTiming & total, const BenchmarkTiming & timing)
+{
+  total.core_s += timing.core_s;
+  total.yolo_s += timing.yolo_s;
+  total.tracker_s += timing.tracker_s;
+  total.aimer_s += timing.aimer_s;
+}
+
+void log_stage_average(const BenchmarkTiming & total, std::size_t frames)
+{
+  tools::logger()->info(
+    "Stage avg: yolo {:.2f} ms, tracker {:.2f} ms, aimer {:.2f} ms",
+    total.yolo_s * 1e3 / frames, total.tracker_s * 1e3 / frames,
+    total.aimer_s * 1e3 / frames);
+}
+
+void log_latency_summary(const std::string & label, std::vector<double> values, double avg_ms)
+{
+  std::sort(values.begin(), values.end());
+  tools::logger()->info(
+    "{}: avg {:.2f} ms, p50 {:.2f} ms, p90 {:.2f} ms, p99 {:.2f} ms, "
+    "min {:.2f} ms, max {:.2f} ms",
+    label, avg_ms, percentile(values, 0.50), percentile(values, 0.90), percentile(values, 0.99),
+    values.front(), values.back());
+}
+
+void log_pipeline_estimate(const BenchmarkTiming & total, std::size_t frames)
+{
+  const auto core_ms = total.core_s * 1e3 / frames;
+  const auto yolo_ms = total.yolo_s * 1e3 / frames;
+  const auto backend_ms = std::max(0.0, core_ms - yolo_ms);
+  const auto pipeline_bottleneck_ms = std::max(yolo_ms, backend_ms);
+  const auto serial_fps = core_ms > 0 ? 1e3 / core_ms : 0.0;
+  const auto pipeline_fps = pipeline_bottleneck_ms > 0 ? 1e3 / pipeline_bottleneck_ms : 0.0;
+  const auto headroom = serial_fps > 0 ? (pipeline_fps / serial_fps - 1.0) * 100.0 : 0.0;
+
+  tools::logger()->info(
+    "Pipeline estimate: serial core {:.2f} FPS, 2-stage upper bound {:.2f} FPS "
+    "(detect {:.2f} ms vs backend {:.2f} ms, +{:.1f}% headroom)",
+    serial_fps, pipeline_fps, yolo_ms, backend_ms, headroom);
+}
+
+}  // namespace
+
 const std::string keys =
   "{help h usage ? |                   | 输出命令行参数说明 }"
   "{config-path c  | configs/demo.yaml | yaml配置文件的路径}"
   "{start-index s  | 0                 | 视频起始帧下标    }"
   "{end-index e    | 0                 | 视频结束帧下标    }"
+  "{benchmark b    |                   | 启用benchmark，预加载输入排除IO }"
+  "{multithread    |                   | benchmark使用检测线程和后端线程流水处理 }"
   "{@input-path    | assets/demo/demo  | avi和txt文件的路径}";
 
 int main(int argc, char * argv[])
@@ -35,7 +221,9 @@ int main(int argc, char * argv[])
   auto config_path = cli.get<std::string>("config-path");
   auto start_index = cli.get<int>("start-index");
   auto end_index = cli.get<int>("end-index");
-  const bool enable_visualization = std::getenv("DISPLAY") != nullptr;
+  const bool benchmark_mode = cli.has("benchmark");
+  const bool multithread_mode = cli.has("multithread");
+  const bool enable_visualization = !benchmark_mode && std::getenv("DISPLAY") != nullptr;
 
   tools::Plotter plotter;
   tools::Exiter exiter;
@@ -56,6 +244,120 @@ int main(int argc, char * argv[])
   auto_aim::Target last_target;
   io::Command last_command;
   double last_t = -1;
+
+  if (benchmark_mode) {
+    auto preload_start = std::chrono::steady_clock::now();
+    auto benchmark_frames = load_benchmark_frames(video, text, start_index, end_index);
+    auto preload_finish = std::chrono::steady_clock::now();
+
+    if (benchmark_frames.empty()) {
+      tools::logger()->warn("Benchmark input is empty. Check video/text path and frame range.");
+      return 1;
+    }
+
+    tools::logger()->info(
+      "Preloaded {} frames in {:.3f}s. This IO time is excluded from benchmark.",
+      benchmark_frames.size(), tools::delta_time(preload_finish, preload_start));
+
+    BenchmarkTiming total_timing;
+    std::vector<double> core_latencies_ms;
+    core_latencies_ms.reserve(benchmark_frames.size());
+    std::vector<double> pipeline_latencies_ms;
+    if (multithread_mode) pipeline_latencies_ms.reserve(benchmark_frames.size());
+
+    auto benchmark_start = std::chrono::steady_clock::now();
+    std::size_t processed_frames = 0;
+    if (multithread_mode) {
+      std::queue<DetectionResult> detection_queue;
+      std::mutex detection_mutex;
+      std::condition_variable detection_cv;
+      bool detector_done = false;
+
+      auto detect_thread = std::thread([&]() {
+        for (std::size_t i = 0; i < benchmark_frames.size(); i++) {
+          if (exiter.exit()) break;
+
+          const auto & frame = benchmark_frames[i];
+          auto detect_start = std::chrono::steady_clock::now();
+          auto armors = yolo.detect(frame.img, frame.frame_count);
+          auto detect_finish = std::chrono::steady_clock::now();
+
+          {
+            std::lock_guard<std::mutex> lock(detection_mutex);
+            detection_queue.push(
+              {i, std::move(armors), tools::delta_time(detect_finish, detect_start), detect_start});
+          }
+          detection_cv.notify_one();
+        }
+
+        {
+          std::lock_guard<std::mutex> lock(detection_mutex);
+          detector_done = true;
+        }
+        detection_cv.notify_one();
+      });
+
+      while (!exiter.exit()) {
+        DetectionResult detection;
+        {
+          std::unique_lock<std::mutex> lock(detection_mutex);
+          detection_cv.wait(lock, [&]() { return detector_done || !detection_queue.empty(); });
+          if (detection_queue.empty()) {
+            if (detector_done) break;
+            continue;
+          }
+
+          detection = std::move(detection_queue.front());
+          detection_queue.pop();
+        }
+
+        auto timing = run_benchmark_backend(
+          benchmark_frames[detection.frame_index], detection.armors, detection.yolo_s, solver,
+          tracker, aimer, last_command, t0);
+        add_timing(total_timing, timing);
+        processed_frames++;
+        core_latencies_ms.push_back(timing.core_s * 1e3);
+        pipeline_latencies_ms.push_back(
+          tools::delta_time(std::chrono::steady_clock::now(), detection.start) * 1e3);
+      }
+
+      if (detect_thread.joinable()) detect_thread.join();
+    } else {
+      for (const auto & frame : benchmark_frames) {
+        if (exiter.exit()) break;
+
+        auto timing = run_benchmark_frame(frame, yolo, solver, tracker, aimer, last_command, t0);
+        add_timing(total_timing, timing);
+        processed_frames++;
+        core_latencies_ms.push_back(timing.core_s * 1e3);
+      }
+    }
+    auto benchmark_finish = std::chrono::steady_clock::now();
+
+    if (processed_frames == 0) {
+      tools::logger()->warn("Benchmark stopped before processing frames.");
+      return 1;
+    }
+
+    const auto process_elapsed_s = tools::delta_time(benchmark_finish, benchmark_start);
+    tools::logger()->info(
+      "Benchmark {} (IO excluded): {} frames, {:.3f}s, {:.2f} FPS, {:.2f} ms/frame",
+      multithread_mode ? "multithread" : "serial",
+      processed_frames, process_elapsed_s, processed_frames / process_elapsed_s,
+      process_elapsed_s * 1e3 / processed_frames);
+    log_latency_summary(
+      "Core compute latency", core_latencies_ms, total_timing.core_s * 1e3 / processed_frames);
+    if (multithread_mode) {
+      log_latency_summary(
+        "Pipeline e2e latency", pipeline_latencies_ms,
+        std::accumulate(pipeline_latencies_ms.begin(), pipeline_latencies_ms.end(), 0.0) /
+          pipeline_latencies_ms.size());
+    }
+    log_stage_average(total_timing, processed_frames);
+    if (!multithread_mode) log_pipeline_estimate(total_timing, processed_frames);
+
+    return 0;
+  }
 
   video.set(cv::CAP_PROP_POS_FRAMES, start_index);
   for (int i = 0; i < start_index; i++) {

@@ -295,6 +295,14 @@ TrtEngine::TrtEngine(
     throw std::runtime_error("Failed to allocate TensorRT output buffer.");
   }
 
+  if (!impl_->context->setTensorAddress(impl_->input_name.c_str(), impl_->device_input)) {
+    throw std::runtime_error("Failed to bind TensorRT input buffer.");
+  }
+
+  if (!impl_->context->setTensorAddress(impl_->output_name.c_str(), impl_->device_output)) {
+    throw std::runtime_error("Failed to bind TensorRT output buffer.");
+  }
+
   spdlog::info(
     "[TensorRT] ready. input={} dtype={} shape={}, output={} dtype={} shape={}",
     input_elements_, data_type_name(impl_->input_dtype), shape_to_string(input_shape_),
@@ -320,9 +328,6 @@ bool TrtEngine::infer(
     return false;
   }
 
-  const auto input_bytes = input_elements_ * data_type_size(impl_->input_dtype);
-  const auto output_bytes = output_elements_ * data_type_size(impl_->output_dtype);
-
   const void * host_input_ptr = nullptr;
   if (impl_->input_dtype == nvinfer1::DataType::kFLOAT) {
     host_input_ptr = input_data;
@@ -347,25 +352,65 @@ bool TrtEngine::infer(
     return false;
   }
 
+  return infer_prepared(host_input_ptr, input_elements, output);
+}
+
+bool TrtEngine::infer_fp16(
+  const void * input_data,
+  std::size_t input_elements,
+  std::vector<float> & output)
+{
+  if (input_data == nullptr) {
+    spdlog::error("[TensorRT] null fp16 input pointer.");
+    return false;
+  }
+
+  if (input_elements != input_elements_) {
+    spdlog::error(
+      "[TensorRT] fp16 input element mismatch, expected {}, got {}",
+      input_elements_, input_elements);
+    return false;
+  }
+
+  if (impl_->input_dtype != nvinfer1::DataType::kHALF) {
+    spdlog::error(
+      "[TensorRT] infer_fp16 requires fp16 input, engine input dtype is {}",
+      data_type_name(impl_->input_dtype));
+    return false;
+  }
+
+  return infer_prepared(input_data, input_elements, output);
+}
+
+bool TrtEngine::input_is_fp16() const
+{
+  return impl_->input_dtype == nvinfer1::DataType::kHALF;
+}
+
+bool TrtEngine::infer_prepared(
+  const void * host_input,
+  std::size_t input_elements,
+  std::vector<float> & output)
+{
+  if (input_elements != input_elements_) {
+    spdlog::error(
+      "[TensorRT] prepared input element mismatch, expected {}, got {}",
+      input_elements_, input_elements);
+    return false;
+  }
+
+  const auto input_bytes = input_elements_ * data_type_size(impl_->input_dtype);
+  const auto output_bytes = output_elements_ * data_type_size(impl_->output_dtype);
+
   if (
     cudaMemcpyAsync(
       impl_->device_input,
-      host_input_ptr,
+      host_input,
       input_bytes,
       cudaMemcpyHostToDevice,
       impl_->stream) != cudaSuccess)
   {
     spdlog::error("[TensorRT] cudaMemcpyAsync H2D failed.");
-    return false;
-  }
-
-  if (!impl_->context->setTensorAddress(impl_->input_name.c_str(), impl_->device_input)) {
-    spdlog::error("[TensorRT] set input tensor address failed.");
-    return false;
-  }
-
-  if (!impl_->context->setTensorAddress(impl_->output_name.c_str(), impl_->device_output)) {
-    spdlog::error("[TensorRT] set output tensor address failed.");
     return false;
   }
 
@@ -711,6 +756,21 @@ TrtEngine::TrtEngine(
 TrtEngine::~TrtEngine() = default;
 
 bool TrtEngine::infer(const float *, std::size_t, std::vector<float> &)
+{
+  return false;
+}
+
+bool TrtEngine::infer_fp16(const void *, std::size_t, std::vector<float> &)
+{
+  return false;
+}
+
+bool TrtEngine::input_is_fp16() const
+{
+  return false;
+}
+
+bool TrtEngine::infer_prepared(const void *, std::size_t, std::vector<float> &)
 {
   return false;
 }

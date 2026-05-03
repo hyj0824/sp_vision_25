@@ -4,6 +4,7 @@
 #include <list>
 #include <memory>
 #include <opencv2/opencv.hpp>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,10 @@ private:
   double min_confidence_, binary_threshold_;
 
   std::unique_ptr<tools::infer::TrtEngine> trt_engine_;
+  cv::Mat input_buffer_;
+  cv::Size letterbox_size_;
+  std::vector<std::uint16_t> fp16_input_;
+  std::vector<float> raw_output_;
 
   cv::Rect roi_;
   cv::Point2f offset_;

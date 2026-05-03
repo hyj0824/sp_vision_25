@@ -2,6 +2,9 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <array>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <stdexcept>
 
@@ -70,6 +73,68 @@ std::vector<float> to_chw_rgb_normalized(const cv::Mat & bgr)
   return chw;
 }
 
+std::uint16_t float_to_half_bits(float value)
+{
+  std::uint32_t bits = 0;
+  std::memcpy(&bits, &value, sizeof(bits));
+
+  const auto sign = static_cast<std::uint16_t>((bits >> 16) & 0x8000);
+  auto exponent = static_cast<int>((bits >> 23) & 0xff) - 127 + 15;
+  auto mantissa = bits & 0x7fffff;
+
+  if (exponent <= 0) {
+    if (exponent < -10) return sign;
+    mantissa |= 0x800000;
+    const auto shift = 14 - exponent;
+    return static_cast<std::uint16_t>(sign | ((mantissa + (1u << (shift - 1))) >> shift));
+  }
+
+  if (exponent >= 31) return static_cast<std::uint16_t>(sign | 0x7c00);
+
+  mantissa += 0x1000;
+  if (mantissa & 0x800000) {
+    mantissa = 0;
+    ++exponent;
+    if (exponent >= 31) return static_cast<std::uint16_t>(sign | 0x7c00);
+  }
+
+  return static_cast<std::uint16_t>(sign | (exponent << 10) | (mantissa >> 13));
+}
+
+const std::array<std::uint16_t, 256> & normalized_half_lut()
+{
+  static const auto lut = [] {
+    std::array<std::uint16_t, 256> values;
+    for (std::size_t i = 0; i < values.size(); ++i) {
+      values[i] = float_to_half_bits(static_cast<float>(i) / 255.0f);
+    }
+    return values;
+  }();
+  return lut;
+}
+
+void write_chw_rgb_normalized_fp16(const cv::Mat & bgr, std::vector<std::uint16_t> & chw)
+{
+  const auto & lut = normalized_half_lut();
+  const auto pixels = static_cast<std::size_t>(bgr.rows) * bgr.cols;
+  chw.resize(3 * pixels);
+  auto * r = chw.data();
+  auto * g = r + pixels;
+  auto * b = g + pixels;
+
+  for (int y = 0; y < bgr.rows; ++y) {
+    const auto * row = bgr.ptr<cv::Vec3b>(y);
+    const auto row_offset = static_cast<std::size_t>(y) * bgr.cols;
+    for (int x = 0; x < bgr.cols; ++x) {
+      const auto offset = row_offset + x;
+      const auto & pixel = row[x];
+      r[offset] = lut[pixel[2]];
+      g[offset] = lut[pixel[1]];
+      b[offset] = lut[pixel[0]];
+    }
+  }
+}
+
 cv::Mat to_output_mat(const std::vector<float> & raw, const std::vector<int64_t> & shape)
 {
   if (shape.size() != 3) {
@@ -131,13 +196,27 @@ void MultiThreadDetector::push(cv::Mat img, std::chrono::steady_clock::time_poin
   auto w = static_cast<int>(img.cols * scale);
 
   // preprocess: keep same letterbox rule as single-thread detector.
-  auto input = cv::Mat(640, 640, CV_8UC3, cv::Scalar(0, 0, 0));
+  if (input_buffer_.empty()) {
+    input_buffer_ = cv::Mat(640, 640, CV_8UC3, cv::Scalar(0, 0, 0));
+  }
+  if (letterbox_size_ != cv::Size(w, h)) {
+    input_buffer_.setTo(cv::Scalar(0, 0, 0));
+    letterbox_size_ = cv::Size(w, h);
+  }
   auto roi = cv::Rect(0, 0, w, h);
-  cv::resize(img, input(roi), {w, h});
+  cv::resize(img, input_buffer_(roi), {w, h});
 
-  auto chw_input = to_chw_rgb_normalized(input);
   std::vector<float> raw_output;
-  if (!trt_engine_->infer(chw_input.data(), chw_input.size(), raw_output)) {
+  bool infer_ok = false;
+  if (trt_engine_->input_is_fp16()) {
+    write_chw_rgb_normalized_fp16(input_buffer_, fp16_input_);
+    infer_ok = trt_engine_->infer_fp16(fp16_input_.data(), fp16_input_.size(), raw_output);
+  } else {
+    auto chw_input = to_chw_rgb_normalized(input_buffer_);
+    infer_ok = trt_engine_->infer(chw_input.data(), chw_input.size(), raw_output);
+  }
+
+  if (!infer_ok) {
     tools::logger()->error("[MultiThreadDetector] TensorRT inference failed.");
     return;
   }

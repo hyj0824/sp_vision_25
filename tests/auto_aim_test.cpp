@@ -284,8 +284,12 @@ int main(int argc, char * argv[])
 
           {
             std::lock_guard<std::mutex> lock(detection_mutex);
-            detection_queue.push(
-              {i, std::move(armors), tools::delta_time(detect_finish, detect_start), detect_start});
+            detection_queue.push({
+              i,
+              std::move(armors),
+              tools::delta_time(detect_finish, detect_start),
+              detect_start,
+            });
           }
           detection_cv.notify_one();
         }
@@ -312,8 +316,8 @@ int main(int argc, char * argv[])
         }
 
         auto timing = run_benchmark_backend(
-          benchmark_frames[detection.frame_index], detection.armors, detection.yolo_s, solver,
-          tracker, aimer, last_command, t0);
+          benchmark_frames[detection.frame_index], detection.armors, detection.yolo_s,
+          solver, tracker, aimer, last_command, t0);
         add_timing(total_timing, timing);
         processed_frames++;
         core_latencies_ms.push_back(timing.core_s * 1e3);

@@ -32,6 +32,10 @@ public:
 
   bool infer(const float * input_data, std::size_t input_elements, std::vector<float> & output);
 
+  bool infer_fp16(const void * input_data, std::size_t input_elements, std::vector<float> & output);
+
+  bool input_is_fp16() const;
+
   std::size_t input_elements() const { return input_elements_; }
 
   std::size_t output_elements() const { return output_elements_; }
@@ -56,6 +60,11 @@ private:
     const TrtOptions & options);
 
   void init_io(const std::vector<int64_t> & requested_input_shape);
+
+  bool infer_prepared(
+    const void * host_input,
+    std::size_t input_elements,
+    std::vector<float> & output);
 
   static std::vector<char> read_binary(const std::string & path);
 

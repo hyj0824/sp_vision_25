@@ -2,6 +2,7 @@
 #define AUTO_AIM__MT_DETECTOR_HPP
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include <tuple>
@@ -31,6 +32,9 @@ public:
 private:
   std::unique_ptr<tools::infer::TrtEngine> trt_engine_;
   YOLO yolo_;
+  cv::Mat input_buffer_;
+  cv::Size letterbox_size_;
+  std::vector<std::uint16_t> fp16_input_;
 
   using QueueItem =
     std::tuple<cv::Mat, std::chrono::steady_clock::time_point, std::vector<float>>;

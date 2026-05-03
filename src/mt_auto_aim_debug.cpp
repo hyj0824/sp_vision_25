@@ -8,7 +8,6 @@
 #include "io/gimbal/gimbal.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/multithread/commandgener.hpp"
-#include "tasks/auto_aim/multithread/mt_detector.hpp"
 #include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
@@ -42,30 +41,23 @@ int main(int argc, char * argv[])
   io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
 
-  auto_aim::multithread::MultiThreadDetector detector(config_path, true);
+  auto_aim::YOLO yolo(config_path, true);
   auto_aim::Solver solver(config_path);
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Aimer aimer(config_path);
   auto_aim::Shooter shooter(config_path);
   auto_aim::multithread::CommandGener commandgener(shooter, aimer, gimbal, plotter, true);
 
-  auto detect_thread = std::thread([&]() {
-    cv::Mat img;
-    std::chrono::steady_clock::time_point t;
-
-    while (!exiter.exit()) {
-      camera.read(img, t);
-      detector.push(img, t);
-    }
-  });
-
   auto mode = io::GimbalMode::IDLE;
   auto last_mode = io::GimbalMode::IDLE;
+  cv::Mat img;
+  std::chrono::steady_clock::time_point t;
 
   while (!exiter.exit()) {
     auto t0 = std::chrono::steady_clock::now();
     /// 自瞄核心逻辑
-    auto [img, armors, t] = detector.debug_pop();
+    camera.read(img, t);
+    auto armors = yolo.detect(img);
     Eigen::Quaterniond q = gimbal.q(t - 1ms);
     mode = gimbal.mode();
 
@@ -167,8 +159,6 @@ int main(int argc, char * argv[])
     auto key = cv::waitKey(1);
     if (key == 'q') break;
   }
-
-  detect_thread.join();
 
   return 0;
 }

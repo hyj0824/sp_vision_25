@@ -1,14 +1,13 @@
 #include <chrono>
 #include <opencv2/opencv.hpp>
-#include <thread>
 
 #include "io/camera.hpp"
 #include "io/gimbal/gimbal.hpp"
 #include "tasks/auto_aim/aimer.hpp"
-#include "tasks/auto_aim/multithread/mt_detector.hpp"
 #include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
+#include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
@@ -34,27 +33,20 @@ int main(int argc, char * argv[])
   io::Camera camera(config_path);
   io::Gimbal gimbal(config_path);
 
-  auto_aim::multithread::MultiThreadDetector detector(config_path);
+  auto_aim::YOLO yolo(config_path, false);
   auto_aim::Solver solver(config_path);
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Aimer aimer(config_path);
   auto_aim::Shooter shooter(config_path);
 
-  auto detect_thread = std::thread([&]() {
-    cv::Mat img;
-    std::chrono::steady_clock::time_point t;
-
-    while (!exiter.exit()) {
-      camera.read(img, t);
-      detector.push(img, t);
-    }
-  });
-
   auto last_t = std::chrono::steady_clock::now();
   nlohmann::json data;
+  cv::Mat img;
+  std::chrono::steady_clock::time_point t;
 
   while (!exiter.exit()) {
-    auto [img, armors, t] = detector.debug_pop();
+    camera.read(img, t);
+    auto armors = yolo.detect(img);
 
     Eigen::Quaterniond q = gimbal.q(t);
 
@@ -147,8 +139,6 @@ int main(int argc, char * argv[])
     auto key = cv::waitKey(1);
     if (key == 'q') break;
   }
-
-  detect_thread.join();
 
   return 0;
 }

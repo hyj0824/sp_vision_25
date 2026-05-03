@@ -103,10 +103,7 @@ IMU型号：使用下位机内置IMU，通过串口上传姿态\
     ./build/auto_aim_test
     ```
 
-    - `auto_aim` 迁移了 `yolov5` 的两条执行路径：
-        - 单线程检测路径（`YOLO::detect`）。
-        - 多线程检测路径（`multithread::MultiThreadDetector`，`push + pop/debug_pop`）。
-        - 若按对外入口函数计，共 3 个入口：`YOLO::detect`、`MultiThreadDetector::pop`、`MultiThreadDetector::debug_pop`（后两者共享同一后处理流程）。
+    - `auto_aim` 的 `yolov5` 推理统一使用 `YOLO::detect` 入口。
     - `auto_aim` 中旧的 `yolov8/yolo11` 实现已移除，不再可选。
     - `auto_buff`（含 `yolo11_buff`）已迁移到 TensorRT（可通过 `BUILD_AUTO_BUFF=OFF` 关闭）。
     - 首次运行若不存在 `yolov5_engine_path`，程序会尝试由 ONNX 自动构建 engine。TensorRT engine 与 GPU/平台绑定，不建议提交到仓库。

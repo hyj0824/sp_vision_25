@@ -14,7 +14,6 @@ add_library(auto_aim OBJECT
     shooter.cpp
     yolo.cpp
     multithread/commandgener.cpp
-    multithread/mt_detector.cpp
     planner/planner.cpp
 )
 

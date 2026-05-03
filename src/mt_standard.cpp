@@ -1,15 +1,15 @@
+#include <atomic>
 #include <chrono>
 #include <opencv2/opencv.hpp>
-#include <thread>
 
 #include "io/camera.hpp"
 #include "io/gimbal/gimbal.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/multithread/commandgener.hpp"
-#include "tasks/auto_aim/multithread/mt_detector.hpp"
 #include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
+#include "tasks/auto_aim/yolo.hpp"
 #include "tasks/auto_buff/buff_aimer.hpp"
 #include "tasks/auto_buff/buff_detector.hpp"
 #include "tasks/auto_buff/buff_solver.hpp"
@@ -44,7 +44,7 @@ int main(int argc, char * argv[])
   io::Camera camera(config_path);
   io::Gimbal gimbal(config_path);
 
-  auto_aim::multithread::MultiThreadDetector detector(config_path);
+  auto_aim::YOLO yolo(config_path, false);
   auto_aim::Solver solver(config_path);
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Aimer aimer(config_path);
@@ -61,19 +61,6 @@ int main(int argc, char * argv[])
   std::atomic<io::GimbalMode> mode{io::GimbalMode::IDLE};
   auto last_mode{io::GimbalMode::IDLE};
 
-  auto detect_thread = std::thread([&]() {
-    cv::Mat img;
-    std::chrono::steady_clock::time_point t;
-
-    while (!exiter.exit()) {
-      if (mode.load() == io::GimbalMode::AUTO_AIM) {
-        camera.read(img, t);
-        detector.push(img, t);
-      } else
-        continue;
-    }
-  });
-
   while (!exiter.exit()) {
     mode = gimbal.mode();
 
@@ -85,7 +72,10 @@ int main(int argc, char * argv[])
     /// 自瞄
     auto gs = gimbal.state();
     if (mode.load() == io::GimbalMode::AUTO_AIM) {
-      auto [img, armors, t] = detector.debug_pop();
+      cv::Mat img;
+      std::chrono::steady_clock::time_point t;
+      camera.read(img, t);
+      auto armors = yolo.detect(img);
       Eigen::Quaterniond q = gimbal.q(t - 1ms);
 
       // recorder.record(img, q, t);
@@ -132,8 +122,6 @@ int main(int argc, char * argv[])
     } else
       continue;
   }
-
-  detect_thread.join();
 
   return 0;
 }

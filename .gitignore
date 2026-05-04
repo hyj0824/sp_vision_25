@@ -5,6 +5,7 @@
 compile_commands.json
 *.engine
 build/
+build-*/
 Camera/
 logs/
 assets/img_with_q/

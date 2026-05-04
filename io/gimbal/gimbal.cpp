@@ -1,4 +1,6 @@
 #include "gimbal.hpp"
+#include "protocols/legacy.hpp"
+#include "protocols/neo.hpp"
 
 #include "tools/crc.hpp"
 #include "tools/logger.hpp"
@@ -6,17 +8,19 @@
 #include "tools/yaml.hpp"
 
 #include <chrono>
+#include <cstdint>
 #include <cstring>
-#include <shared_mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace io {
 namespace {
 using namespace std::chrono_literals;
 
+constexpr size_t RX_BUFFER_SIZE = 16384;
+constexpr size_t TX_BUFFER_SIZE = 64;
 constexpr int RECONNECT_LOG_INTERVAL = 10;
-constexpr uint64_t BAD_RX_PACKET_RECONNECT_THRESHOLD = 5;
 constexpr uint32_t SERIAL_TIMEOUT_MS = 50;
 constexpr auto RECONNECT_DELAY = 1s;
 
@@ -32,20 +36,23 @@ std::string compact_exception_message(const std::exception &e) {
 Gimbal::Gimbal(const std::string &config_path) {
   auto yaml = tools::load(config_path);
   auto com_port = tools::read<std::string>(yaml, "com_port");
+  auto protocol = tools::read<std::string>(yaml, "protocol");
 
-  try {
-    auto timeout = serial::Timeout::simpleTimeout(SERIAL_TIMEOUT_MS);
-    serial_.setPort(com_port);
-    serial_.setTimeout(timeout);
-    serial_.open();
-    serial_.flushInput();
-    serial_available_ = true;
-    tools::logger()->info("[Gimbal] Serial opened: {}", com_port);
-  } catch (const std::exception &e) {
-    serial_available_ = false;
-    tools::logger()->warn("[Gimbal] Serial {} is not available yet: {}",
-                          com_port, compact_exception_message(e));
+  if (protocol == "neo") {
+    protocol_ = std::make_unique<protocol::neo::NeoProtocol>();
+    rx_packet_size_ = sizeof(protocol::neo::GimbalToVision);
+    tx_packet_size_ = sizeof(protocol::neo::VisionToGimbal);
+  } else if (protocol == "legacy") {
+    protocol_ = std::make_unique<protocol::legacy::LegacyProtocol>();
+    rx_packet_size_ = sizeof(protocol::legacy::GimbalToVision);
+    tx_packet_size_ = sizeof(protocol::legacy::VisionToGimbal);
+  } else {
+    throw std::runtime_error("Unsupported gimbal protocol: " + protocol);
   }
+
+  auto timeout = serial::Timeout::simpleTimeout(SERIAL_TIMEOUT_MS);
+  serial_.setPort(com_port);
+  serial_.setTimeout(timeout);
 
   thread_ = std::thread(&Gimbal::read_thread, this);
 }
@@ -55,7 +62,6 @@ Gimbal::~Gimbal() {
   if (thread_.joinable())
     thread_.join();
 
-  std::unique_lock<std::shared_mutex> lock(serial_mutex_);
   try {
     if (serial_.isOpen())
       serial_.close();
@@ -67,12 +73,12 @@ Gimbal::~Gimbal() {
 
 GimbalMode Gimbal::mode() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return mode_;
+  return protocol_->mode();
 }
 
 GimbalState Gimbal::state() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return state_;
+  return protocol_->state();
 }
 
 std::string Gimbal::str(GimbalMode mode) const {
@@ -110,18 +116,10 @@ Eigen::Quaterniond Gimbal::q(std::chrono::steady_clock::time_point t) {
 void Gimbal::send(bool control, bool fire, float yaw, float yaw_vel,
                   float yaw_acc, float pitch, float pitch_vel,
                   float pitch_acc) {
-  VisionToGimbal tx_data;
-  tx_data.mode = control ? (fire ? 2 : 1) : 0;
-  tx_data.yaw = yaw;
-  tx_data.yaw_vel = yaw_vel;
-  tx_data.yaw_acc = yaw_acc;
-  tx_data.pitch = pitch;
-  tx_data.pitch_vel = pitch_vel;
-  tx_data.pitch_acc = pitch_acc;
-  tx_data.crc16 = tools::get_crc16(reinterpret_cast<const uint8_t *>(&tx_data),
-                                   sizeof(tx_data) - sizeof(tx_data.crc16));
-
-  write(reinterpret_cast<const uint8_t *>(&tx_data), sizeof(tx_data));
+  std::vector<uint8_t> buffer(tx_packet_size_);
+  protocol_->serialize(buffer.data(), tx_packet_size_, control, fire, yaw,
+                       yaw_vel, yaw_acc, pitch, pitch_vel, pitch_acc);
+  write(buffer.data(), tx_packet_size_);
 }
 
 void Gimbal::send(const Command &command) {
@@ -129,15 +127,11 @@ void Gimbal::send(const Command &command) {
 }
 
 bool Gimbal::write(const uint8_t *buffer, size_t size) {
-  if (!serial_available_) {
-    ++dropped_tx_count_;
+  if (!serial_ok_)
     return false;
-  }
 
-  std::shared_lock<std::shared_mutex> lock(serial_mutex_);
   if (!serial_.isOpen()) {
-    ++dropped_tx_count_;
-    mark_serial_unavailable("write", "serial port is closed");
+    mark_serial_error("write", "serial port is closed");
     return false;
   }
 
@@ -146,162 +140,53 @@ bool Gimbal::write(const uint8_t *buffer, size_t size) {
     if (written == size)
       return true;
 
-    ++dropped_tx_count_;
-    mark_serial_unavailable("write", "short write");
+    mark_serial_error("write", "short write");
     return false;
   } catch (const std::exception &e) {
-    ++dropped_tx_count_;
-    mark_serial_unavailable("write", compact_exception_message(e));
+    mark_serial_error("write", compact_exception_message(e));
     return false;
   }
-}
-
-Gimbal::ReadStatus Gimbal::read(uint8_t *buffer, size_t size) {
-  if (!serial_available_)
-    return ReadStatus::ERROR;
-
-  std::shared_lock<std::shared_mutex> lock(serial_mutex_);
-  if (!serial_.isOpen()) {
-    mark_serial_unavailable("read", "serial port is closed");
-    return ReadStatus::ERROR;
-  }
-
-  try {
-    const auto read_size = serial_.read(buffer, size);
-    if (read_size == size)
-      return ReadStatus::OK;
-    return ReadStatus::TIMEOUT;
-  } catch (const std::exception &e) {
-    mark_serial_unavailable("read", compact_exception_message(e));
-    return ReadStatus::ERROR;
-  }
-}
-
-Gimbal::ReadStatus Gimbal::read_header(PacketHead &head) {
-  uint8_t buffer[sizeof(PacketHead)]{};
-  size_t buffered = 0;
-
-  while (!quit_) {
-    uint8_t byte = 0;
-    auto status = read(&byte, 1);
-    if (status != ReadStatus::OK)
-      return status;
-
-    if (buffered == 0) {
-      if (byte != SOF)
-        continue;
-      buffer[buffered++] = byte;
-      continue;
-    }
-
-    buffer[buffered++] = byte;
-    if (buffered < sizeof(PacketHead))
-      continue;
-
-    std::memcpy(&head, buffer, sizeof(PacketHead));
-    if (head.is_valid())
-      return ReadStatus::OK;
-
-    buffered = 0;
-    for (size_t i = 1; i < sizeof(PacketHead); ++i) {
-      if (buffer[i] == SOF) {
-        buffered = sizeof(PacketHead) - i;
-        std::memmove(buffer, buffer + i, buffered);
-        break;
-      }
-    }
-  }
-
-  return ReadStatus::ERROR;
-}
-
-Gimbal::ReadStatus
-Gimbal::read_packet(std::chrono::steady_clock::time_point &timestamp) {
-  PacketHead head;
-  auto status = read_header(head);
-  if (status != ReadStatus::OK)
-    return status;
-
-  constexpr uint16_t expected_payload_len = sizeof(GimbalToVision) - 8;
-  if (head.payload_len != expected_payload_len) {
-    log_bad_rx_packet(
-        "invalid payload_len: " + std::to_string(head.payload_len) +
-        ", expected: " + std::to_string(expected_payload_len));
-    return serial_available_ ? ReadStatus::INVALID : ReadStatus::ERROR;
-  }
-
-  rx_data_.head = head;
-  timestamp = std::chrono::steady_clock::now();
-
-  status = read(reinterpret_cast<uint8_t *>(&rx_data_) + sizeof(rx_data_.head),
-                sizeof(rx_data_) - sizeof(rx_data_.head));
-  if (status != ReadStatus::OK)
-    return status;
-
-  if (!tools::check_crc16(reinterpret_cast<uint8_t *>(&rx_data_),
-                          sizeof(rx_data_))) {
-    log_bad_rx_packet("CRC16 check failed");
-    return serial_available_ ? ReadStatus::INVALID : ReadStatus::ERROR;
-  }
-
-  if (rx_data_.cmd_id != 0x0002) {
-    log_bad_rx_packet("invalid cmd_id: " + std::to_string(rx_data_.cmd_id));
-    return serial_available_ ? ReadStatus::INVALID : ReadStatus::ERROR;
-  }
-
-  return ReadStatus::OK;
 }
 
 void Gimbal::read_thread() {
   tools::logger()->info("[Gimbal] read_thread started.");
+  std::vector<uint8_t> buffer(RX_BUFFER_SIZE);
+  auto it = buffer.begin();
+  std::chrono::steady_clock::time_point t;
 
   while (!quit_) {
-    if (!serial_available_) {
+    if (!serial_ok_) {
       reconnect();
       continue;
     }
 
-    std::chrono::steady_clock::time_point t;
-    auto status = read_packet(t);
-    if (status == ReadStatus::ERROR) {
-      reconnect();
-      continue;
-    }
-    if (status == ReadStatus::TIMEOUT || status == ReadStatus::INVALID) {
-      continue;
-    }
+    try {
+      std::vector<uint8_t> mbuff(rx_packet_size_ * 2);
+      size_t read_size = serial_.read(mbuff, rx_packet_size_ * 2);
 
-    on_valid_rx_packet();
-    Eigen::Quaterniond q(rx_data_.q[0], rx_data_.q[1], rx_data_.q[2],
-                         rx_data_.q[3]);
-    queue_.push({q, t});
+      if (buffer.size() + read_size > buffer.capacity()) {
+        // 循环不会读非完整包
+        std::vector<uint8_t> tmp(it, buffer.end());
+        buffer.clear();
+        buffer.insert(buffer.end(), tmp.begin(), tmp.end());
+        it = buffer.begin();
+      }
+      buffer.insert(buffer.end(), mbuff.begin(), mbuff.begin() + read_size);
 
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    state_.yaw = rx_data_.yaw;
-    state_.yaw_vel = rx_data_.yaw_vel;
-    state_.pitch = rx_data_.pitch;
-    state_.pitch_vel = rx_data_.pitch_vel;
-    state_.bullet_speed = rx_data_.bullet_speed;
-    state_.bullet_count = rx_data_.bullet_count;
-
-    switch (rx_data_.mode) {
-    case 0:
-      mode_ = GimbalMode::IDLE;
-      break;
-    case 1:
-      mode_ = GimbalMode::AUTO_AIM;
-      break;
-    case 2:
-      mode_ = GimbalMode::SMALL_BUFF;
-      break;
-    case 3:
-      mode_ = GimbalMode::BIG_BUFF;
-      break;
-    default:
-      mode_ = GimbalMode::IDLE;
-      tools::logger()->warn("[Gimbal] Invalid mode: {}", rx_data_.mode);
-      break;
+      for (; it + rx_packet_size_ <= buffer.end(); ++it) {
+        bool valid = false;
+        {
+          std::lock_guard<std::mutex> lock(mutex_);
+          valid = protocol_->parse(it.base(), rx_packet_size_);
+        }
+        if (valid) {
+          t = std::chrono::steady_clock::now();
+          queue_.push({protocol_->q(), t});
+          break;
+        }
+      }
+    } catch (const std::exception &e) {
+      mark_serial_error("read", compact_exception_message(e));
     }
   }
 
@@ -310,30 +195,21 @@ void Gimbal::read_thread() {
 
 void Gimbal::reconnect() {
   int attempt = 0;
-  while (!quit_ && !serial_available_) {
+  while (!quit_ && !serial_ok_) {
     ++attempt;
 
     try {
-      std::unique_lock<std::shared_mutex> lock(serial_mutex_);
       if (serial_.isOpen())
         serial_.close();
       serial_.open();
       serial_.flushInput();
 
-      serial_available_ = true;
-      bad_rx_packet_count_ = 0;
+      serial_ok_ = true;
       queue_.clear();
-      const auto dropped = dropped_tx_count_.exchange(0);
-      if (dropped > 0) {
-        tools::logger()->warn(
-            "[Gimbal] Serial reconnected after dropping {} command frame(s).",
-            dropped);
-      } else {
-        tools::logger()->info("[Gimbal] Serial reconnected.");
-      }
+      tools::logger()->info("[Gimbal] Serial reconnected.");
       return;
     } catch (const std::exception &e) {
-      serial_available_ = false;
+      serial_ok_ = false;
       if (attempt == 1 || attempt % RECONNECT_LOG_INTERVAL == 0) {
         tools::logger()->warn("[Gimbal] Serial reconnect attempt {} failed: {}",
                               attempt, compact_exception_message(e));
@@ -344,39 +220,13 @@ void Gimbal::reconnect() {
   }
 }
 
-void Gimbal::log_bad_rx_packet(const std::string &reason) {
-  ++bad_rx_packet_count_;
-  if (bad_rx_packet_count_ >= BAD_RX_PACKET_RECONNECT_THRESHOLD) {
-    tools::logger()->warn("[Gimbal] Too many invalid RX packets ({}), "
-                          "reconnecting serial. Last error: {}",
-                          bad_rx_packet_count_, reason);
-    bad_rx_packet_count_ = 0;
-    mark_serial_unavailable("read", "invalid packet stream");
-    return;
-  }
-
-  if (bad_rx_packet_count_ == 1) {
-    tools::logger()->debug("[Gimbal] Dropped invalid RX packet: {}", reason);
-  }
-}
-
-void Gimbal::on_valid_rx_packet() {
-  if (bad_rx_packet_count_ == 0)
+void Gimbal::mark_serial_error(const char *operation,
+                               const std::string &reason) {
+  if (!serial_ok_.exchange(false))
     return;
 
-  tools::logger()->debug(
-      "[Gimbal] RX stream recovered after {} invalid packet(s).",
-      bad_rx_packet_count_);
-  bad_rx_packet_count_ = 0;
-}
-
-void Gimbal::mark_serial_unavailable(const char *operation,
-                                     const std::string &reason) {
-  const bool was_available = serial_available_.exchange(false);
-  if (was_available) {
-    tools::logger()->warn("[Gimbal] Serial disconnected during {}: {}",
-                          operation, reason);
-  }
+  tools::logger()->warn("[Gimbal] Serial disconnected during {}: {}", operation,
+                        reason);
 }
 
 } // namespace io

@@ -24,13 +24,6 @@ constexpr int RECONNECT_LOG_INTERVAL = 10;
 constexpr uint32_t SERIAL_TIMEOUT_MS = 50;
 constexpr auto RECONNECT_DELAY = 1s;
 
-std::string compact_exception_message(const std::exception &e) {
-  std::string message = e.what();
-  const auto file_pos = message.find(", file ");
-  if (file_pos != std::string::npos)
-    message.erase(file_pos);
-  return message;
-}
 } // namespace
 
 Gimbal::Gimbal(const std::string &config_path) {
@@ -67,7 +60,7 @@ Gimbal::~Gimbal() {
       serial_.close();
   } catch (const std::exception &e) {
     tools::logger()->debug("[Gimbal] Ignored serial close failure: {}",
-                           compact_exception_message(e));
+                           e.what());
   }
 }
 
@@ -97,6 +90,10 @@ std::string Gimbal::str(GimbalMode mode) const {
 }
 
 Eigen::Quaterniond Gimbal::q(std::chrono::steady_clock::time_point t) {
+  if (queue_.empty()) {
+    mark_serial_error("q", "no data in queue");
+    return Eigen::Quaterniond::Identity();
+  }
   while (true) {
     auto [q_a, t_a] = queue_.pop();
     auto [q_b, t_b] = queue_.front();
@@ -126,25 +123,18 @@ void Gimbal::send(const Command &command) {
   send(command.control, command.shoot, command.yaw, 0, 0, command.pitch, 0, 0);
 }
 
-bool Gimbal::write(const uint8_t *buffer, size_t size) {
-  if (!serial_ok_)
-    return false;
-
-  if (!serial_.isOpen()) {
-    mark_serial_error("write", "serial port is closed");
-    return false;
-  }
+void Gimbal::write(const uint8_t *buffer, size_t size) {
+  // 这是个回调，不应该在这里重试连接，重试连接应该在read_thread里做
+  if (!serial_ok_ || !serial_.isOpen())
+    return;
 
   try {
     const auto written = serial_.write(buffer, size);
-    if (written == size)
-      return true;
-
-    mark_serial_error("write", "short write");
-    return false;
+    if (written != size) {
+      mark_serial_error("write", "short write");
+    }
   } catch (const std::exception &e) {
-    mark_serial_error("write", compact_exception_message(e));
-    return false;
+    mark_serial_error("write", e.what());
   }
 }
 
@@ -152,7 +142,6 @@ void Gimbal::read_thread() {
   tools::logger()->info("[Gimbal] read_thread started.");
   std::vector<uint8_t> buffer(RX_BUFFER_SIZE);
   auto it = buffer.begin();
-  std::chrono::steady_clock::time_point t;
 
   while (!quit_) {
     if (!serial_ok_) {
@@ -180,13 +169,12 @@ void Gimbal::read_thread() {
           valid = protocol_->parse(it.base(), rx_packet_size_);
         }
         if (valid) {
-          t = std::chrono::steady_clock::now();
-          queue_.push({protocol_->q(), t});
+          queue_.push({protocol_->q(), std::chrono::steady_clock::now()});
           break;
         }
       }
     } catch (const std::exception &e) {
-      mark_serial_error("read", compact_exception_message(e));
+      mark_serial_error("read", e.what());
     }
   }
 
@@ -212,7 +200,7 @@ void Gimbal::reconnect() {
       serial_ok_ = false;
       if (attempt == 1 || attempt % RECONNECT_LOG_INTERVAL == 0) {
         tools::logger()->warn("[Gimbal] Serial reconnect attempt {} failed: {}",
-                              attempt, compact_exception_message(e));
+                              attempt, e.what());
       }
     }
 
@@ -225,7 +213,7 @@ void Gimbal::mark_serial_error(const char *operation,
   if (!serial_ok_.exchange(false))
     return;
 
-  tools::logger()->warn("[Gimbal] Serial disconnected during {}: {}", operation,
+  tools::logger()->error("[Gimbal] During {}: {}", operation,
                         reason);
 }
 

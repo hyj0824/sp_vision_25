@@ -98,7 +98,7 @@ private:
   size_t tx_packet_size_{};
   size_t rx_packet_size_{};
 
-  bool write(const uint8_t *buffer, size_t size);
+  void write(const uint8_t *buffer, size_t size);
   void read_thread();
   void reconnect();
   void mark_serial_error(const char *operation, const std::string &reason);

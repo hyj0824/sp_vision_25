@@ -1,18 +1,3 @@
-/**
- *   数据帧
- *   ┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬─────────┬───────┬───────┐
- *   │ SOF  │LEN_L │LEN_H │ CRC8 │ID_L  │ ID_H │FLG_L │FLG_H │ DATA... │CRC16_L│CRC16_H│
- *   │ 0xA5 │      │      │      │      │      │      │      │ float[] │       │       │
- *   └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴─────────┴───────┴───────┘
- *   CRC8  : Get_CRC8([0,1,2])
- *   CRC16 : Get_CRC16(buf[0..total-3], init=0xFFFF)，存于末 2 字节
- *   LEN (payload_len) = flags(2B) + float数组(N×4B)
- *                     = total_len - 8
- *
- *   CMD_ID_IMU     = 0x0002  下位机→视觉
- *   CMD_ID_VISION  = 0x0003  视觉→下位机
- */
-
 #ifndef IO__GIMBAL_HPP
 #define IO__GIMBAL_HPP
 

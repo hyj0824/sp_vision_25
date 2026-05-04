@@ -7,6 +7,21 @@
 
 namespace io::protocol::neo {
 
+/**
+ *   数据帧
+ *   ┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬─────────┬───────┬───────┐
+ *   │ SOF  │LEN_L │LEN_H │ CRC8 │ID_L  │ ID_H │FLG_L │FLG_H │ DATA... │CRC16_L│CRC16_H│
+ *   │ 0xA5 │      │      │      │      │      │      │      │ float[] │       │       │
+ *   └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴─────────┴───────┴───────┘
+ *   CRC8  : Get_CRC8([0,1,2])
+ *   CRC16 : Get_CRC16(buf[0..total-3], init=0xFFFF)，存于末 2 字节
+ *   LEN (payload_len) = flags(2B) + float数组(N×4B)
+ *                     = total_len - 8
+ *
+ *   CMD_ID_IMU     = 0x0002  下位机→视觉
+ *   CMD_ID_VISION  = 0x0003  视觉→下位机
+ */
+
 constexpr uint8_t SOF = 0xA5;
 
 struct __attribute__((packed)) PacketHead {
@@ -21,9 +36,15 @@ struct __attribute__((packed)) PacketHead {
   }
 };
 
+template <uint16_t payload_len>
+inline constexpr PacketHead make_head() {
+  PacketHead head{SOF, payload_len, 0};
+  head.crc8 = tools::get_crc8(reinterpret_cast<const uint8_t *>(&head), 3);
+  return head;
+}
+
 struct __attribute__((packed)) GimbalToVision {
-  PacketHead head{SOF, sizeof(GimbalToVision) - 8,
-                  tools::get_crc8(reinterpret_cast<const uint8_t *>(this), 3)};
+  PacketHead head = make_head<sizeof(GimbalToVision) - 8>();
   uint16_t cmd_id = 0x0002;
 
   uint8_t mode;         // 0: 空闲, 1: 自瞄, 2: 小符, 3: 大符
@@ -38,11 +59,10 @@ struct __attribute__((packed)) GimbalToVision {
   uint16_t crc16;
 };
 
-static_assert(sizeof(GimbalToVision) <= 64);
+static_assert(sizeof(GimbalToVision) == 46);
 
 struct __attribute__((packed)) VisionToGimbal {
-  PacketHead head{SOF, sizeof(VisionToGimbal) - 8,
-                  tools::get_crc8(reinterpret_cast<const uint8_t *>(this), 3)};
+  PacketHead head = make_head<sizeof(VisionToGimbal) - 8>();
   uint16_t cmd_id = 0x0003;
 
   uint8_t mode; // 0: 不控制, 1: 控制云台但不开火，2: 控制云台且开火
@@ -57,7 +77,7 @@ struct __attribute__((packed)) VisionToGimbal {
   uint16_t crc16;
 };
 
-static_assert(sizeof(VisionToGimbal) <= 64);
+static_assert(sizeof(VisionToGimbal) == 34);
 
 class NeoProtocol : public BaseProtocol {
 public:
@@ -84,6 +104,11 @@ public:
     if (!rx_data.head.is_valid()) {
       return false;
     }
+
+    if (!tools::check_crc16(buffer, sizeof(GimbalToVision))) {
+      return false;
+    }
+
     mode_ = static_cast<GimbalMode>(rx_data.mode);
     state_.yaw = rx_data.yaw;
     state_.yaw_vel = rx_data.yaw_vel;

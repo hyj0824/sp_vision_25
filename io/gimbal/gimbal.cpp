@@ -31,6 +31,7 @@ Gimbal::Gimbal(const std::string &config_path) {
   auto yaml = tools::load(config_path);
   auto com_port = tools::read<std::string>(yaml, "com_port");
   auto protocol = tools::read<std::string>(yaml, "protocol");
+  auto baud_rate = tools::read<uint32_t>(yaml, "baud_rate");
 
   if (protocol == "neo") {
     protocol_ = std::make_unique<protocol::neo::NeoProtocol>();
@@ -46,6 +47,7 @@ Gimbal::Gimbal(const std::string &config_path) {
 
   auto timeout = serial::Timeout::simpleTimeout(SERIAL_TIMEOUT_MS);
   serial_.setPort(com_port);
+  serial_.setBaudrate(baud_rate);
   serial_.setTimeout(timeout);
 
   thread_ = std::thread(&Gimbal::read_thread, this);

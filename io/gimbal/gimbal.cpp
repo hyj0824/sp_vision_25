@@ -7,6 +7,7 @@
 #include "tools/math_tools.hpp"
 #include "tools/yaml.hpp"
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -140,8 +141,11 @@ void Gimbal::write(const uint8_t *buffer, size_t size) {
 
 void Gimbal::read_thread() {
   tools::logger()->info("[Gimbal] read_thread started.");
-  std::vector<uint8_t> buffer(RX_BUFFER_SIZE);
-  auto it = buffer.begin();
+
+  // buffer 的容量固定，buffered_size 表示当前有效字节数。
+  // 这里不使用 insert/erase 追加和裁剪数据
+  std::array<uint8_t, RX_BUFFER_SIZE> buffer{};
+  size_t buffered_size = 0;
 
   while (!quit_) {
     if (!serial_ok_) {
@@ -150,27 +154,45 @@ void Gimbal::read_thread() {
     }
 
     try {
-      std::vector<uint8_t> mbuff(rx_packet_size_ * 2);
-      size_t read_size = serial_.read(mbuff, rx_packet_size_ * 2);
-
-      if (buffer.size() + read_size > buffer.capacity()) {
-        // 循环不会读非完整包
-        std::vector<uint8_t> tmp(it, buffer.end());
-        buffer.clear();
-        buffer.insert(buffer.end(), tmp.begin(), tmp.end());
-        it = buffer.begin();
+      size_t read_capacity = rx_packet_size_ * 2;
+      if (buffered_size + read_capacity > buffer.size()) {
+        // 尾部空间不足时只保留末尾残包；最多保留一帧长度减 1，
+        // 下一轮读入后仍能拼出跨 read 边界的完整数据帧。
+        size_t keep_size = rx_packet_size_ - 1;
+        if (buffered_size < keep_size)
+          keep_size = buffered_size;
+        if (keep_size > 0) {
+          std::memmove(buffer.data(), buffer.data() + buffered_size - keep_size,
+                       keep_size);
+        }
+        buffered_size = keep_size;
       }
-      buffer.insert(buffer.end(), mbuff.begin(), mbuff.begin() + read_size);
 
-      for (; it + rx_packet_size_ <= buffer.end(); ++it) {
+      // 新数据直接读到有效区尾部，主缓冲本身不增长。
+      size_t read_size =
+          serial_.read(buffer.data() + buffered_size, read_capacity);
+      buffered_size += read_size;
+
+      size_t scan_pos = 0;
+      while (scan_pos + rx_packet_size_ <= buffered_size) {
         bool valid = false;
         {
           std::lock_guard<std::mutex> lock(mutex_);
-          valid = protocol_->parse(it.base(), rx_packet_size_);
+          valid = protocol_->parse(buffer.data() + scan_pos, rx_packet_size_);
         }
         if (valid) {
           queue_.push({protocol_->q(), std::chrono::steady_clock::now()});
-          break;
+          scan_pos += rx_packet_size_;
+        } else {
+          ++scan_pos;
+        }
+      }
+
+      if (scan_pos > 0) {
+        // scan_pos 前面的字节已经是噪声或完整帧，把剩余残包搬到缓冲区头部。
+        buffered_size -= scan_pos;
+        if (buffered_size > 0) {
+          std::memmove(buffer.data(), buffer.data() + scan_pos, buffered_size);
         }
       }
     } catch (const std::exception &e) {
@@ -213,8 +235,7 @@ void Gimbal::mark_serial_error(const char *operation,
   if (!serial_ok_.exchange(false))
     return;
 
-  tools::logger()->error("[Gimbal] During {}: {}", operation,
-                        reason);
+  tools::logger()->error("[Gimbal] During {}: {}", operation, reason);
 }
 
 } // namespace io

@@ -106,15 +106,10 @@ IMU型号：使用下位机内置IMU，通过串口上传姿态\
     - `auto_aim` 的 `yolov5` 推理统一使用 `YOLO::detect` 入口。
     - `auto_aim` 中旧的 `yolov8/yolo11` 实现已移除，不再可选。
     - `auto_buff`（含 `yolo11_buff`）已迁移到 TensorRT（可通过 `BUILD_AUTO_BUFF=OFF` 关闭）。
-    - 首次运行若不存在 `yolov5_engine_path`，程序会尝试由 ONNX 自动构建 engine。TensorRT engine 与 GPU/平台绑定，不建议提交到仓库。
+    - 默认启动只加载已有 engine，缺失或加载失败会直接报错；engine 由外部工具手动生成。TensorRT engine 与 GPU/平台绑定，不建议提交到仓库。
     - 建议在配置中使用：
-        - `yolov5_model_path: assets/0526.onnx`
         - `yolov5_engine_path: assets/0526.engine`
-        - `trt_fp16: true`
-        - `trt_force_rebuild: false`
-        - `trt_workspace_mb: 1024`
     - `auto_buff` 建议在配置中使用：
-        - `buff_model_path: assets/yolo11_buff_int8.onnx`
         - `buff_engine_path: assets/yolo11_buff_int8.engine`
         - 模型输出需保持 6 个关键点布局（即 `1x17x8400` 或等价转置）。
 

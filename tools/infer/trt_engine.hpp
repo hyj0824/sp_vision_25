@@ -12,27 +12,18 @@ namespace tools
 namespace infer
 {
 
-struct TrtOptions
-{
-  bool enable_fp16 = true;
-  bool force_rebuild = false;
-  std::size_t workspace_size_bytes = 1ULL << 30;
-};
-
 class TrtEngine
 {
 public:
-  TrtEngine(
-    const std::string & onnx_path,
-    const std::string & engine_path,
-    const std::vector<int64_t> & input_shape,
-    const TrtOptions & options = {});
+  explicit TrtEngine(const std::string & engine_path);
 
   ~TrtEngine();
 
-  bool infer(const float * input_data, std::size_t input_elements, std::vector<float> & output);
-
-  bool infer_fp16(const void * input_data, std::size_t input_elements, std::vector<float> & output);
+  bool infer(
+    const void * input_data,
+    std::size_t input_bytes,
+    void * output_data,
+    std::size_t output_bytes);
 
   bool input_is_fp16() const;
 
@@ -45,30 +36,9 @@ public:
   const std::vector<int64_t> & output_shape() const { return output_shape_; }
 
 private:
-  bool build_or_load_engine(
-    const std::string & onnx_path,
-    const std::string & engine_path,
-    const std::vector<int64_t> & requested_input_shape,
-    const TrtOptions & options);
-
   bool load_engine(const std::string & engine_path);
 
-  bool build_engine(
-    const std::string & onnx_path,
-    const std::string & engine_path,
-    const std::vector<int64_t> & requested_input_shape,
-    const TrtOptions & options);
-
-  void init_io(const std::vector<int64_t> & requested_input_shape);
-
-  bool infer_prepared(
-    const void * host_input,
-    std::size_t input_elements,
-    std::vector<float> & output);
-
-  static std::vector<char> read_binary(const std::string & path);
-
-  static void write_binary(const std::string & path, const void * data, std::size_t size);
+  void init_io();
 
   class Impl;
   std::unique_ptr<Impl> impl_;

@@ -4,11 +4,7 @@ enemy_color: "blue"
 
 #####-----神经网络参数-----#####
 classify_model: assets/tiny_resnet.onnx
-yolov5_model_path: assets/0526.onnx
 yolov5_engine_path: assets/0526.engine
-trt_fp16: true
-trt_force_rebuild: false
-trt_workspace_mb: 1024
 min_confidence: 0.8
 use_traditional: true
 
@@ -77,7 +73,6 @@ auto_fire: true # 是否由自瞄控制射击
 mode: 1
 
 #####-----buff_detector参数-----#####
-buff_model_path: assets/yolo11_buff_int8.onnx
 buff_engine_path: assets/yolo11_buff_int8.engine
 
 #####-----工业相机标定参数-----#####

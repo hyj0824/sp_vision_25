@@ -4,11 +4,7 @@ enemy_color: "red"
 
 #####-----神经网络参数-----#####
 classify_model: assets/tiny_resnet.onnx
-yolov5_model_path: assets/0526.onnx
 yolov5_engine_path: assets/0526.engine
-trt_fp16: true
-trt_force_rebuild: false
-trt_workspace_mb: 1024
 min_confidence: 0.8
 use_traditional: true
 
@@ -92,7 +88,6 @@ t_camera2gimbal: [-0.034955523715399906, -0.000074403211899371, 0.00124817391010
 
 
 #####-----buff_detector参数-----#####
-buff_model_path: assets/yolo11_buff_int8.onnx
 buff_engine_path: assets/yolo11_buff_int8.engine
 
 #####-----buff_aimer参数-----#####

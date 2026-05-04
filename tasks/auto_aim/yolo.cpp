@@ -1,6 +1,7 @@
 #include "yolo.hpp"
 
 #include <fmt/chrono.h>
+#include <opencv2/core/hal/interface.h>
 #include <yaml-cpp/yaml.h>
 
 #include <array>
@@ -16,49 +17,6 @@ namespace auto_aim
 {
 namespace
 {
-
-std::string to_onnx_path(const std::string & model_path)
-{
-  std::filesystem::path path(model_path);
-  if (path.extension().string() == ".onnx") {
-    return model_path;
-  }
-
-  const auto fallback = path.replace_extension(".onnx").string();
-  if (std::filesystem::exists(fallback)) {
-    tools::logger()->warn(
-      "yolov5_model_path={} is not ONNX, fallback to {} for TensorRT build.", model_path,
-      fallback);
-    return fallback;
-  }
-
-  tools::logger()->warn(
-    "yolov5_model_path={} is not ONNX and no fallback .onnx found. "
-    "Engine-only startup is still possible if yolov5_engine_path exists.",
-    model_path);
-  return "";
-}
-
-std::string to_default_engine_path(const std::string & onnx_path)
-{
-  if (onnx_path.empty()) {
-    return "";
-  }
-
-  std::filesystem::path path(onnx_path);
-  path.replace_extension(".engine");
-  return path.string();
-}
-
-std::size_t read_workspace_size_bytes(const YAML::Node & yaml)
-{
-  const auto workspace_mb = yaml["trt_workspace_mb"] ? yaml["trt_workspace_mb"].as<int>() : 1024;
-  if (workspace_mb <= 0) {
-    throw std::runtime_error("trt_workspace_mb must be a positive integer.");
-  }
-
-  return static_cast<std::size_t>(workspace_mb) * 1024ULL * 1024ULL;
-}
 
 std::vector<float> to_chw_rgb_normalized(const cv::Mat & bgr)
 {
@@ -169,14 +127,12 @@ YOLO::YOLO(const std::string & config_path, bool debug)
 {
   auto yaml = YAML::LoadFile(config_path);
 
-  model_path_ = to_onnx_path(yaml["yolov5_model_path"].as<std::string>());
-  engine_path_ =
-    yaml["yolov5_engine_path"] ? yaml["yolov5_engine_path"].as<std::string>()
-                               : to_default_engine_path(model_path_);
-  if (model_path_.empty() && engine_path_.empty()) {
-    throw std::runtime_error(
-      "TensorRT yolov5 requires yolov5_model_path to resolve to an ONNX file, "
-      "or yolov5_engine_path to point to an existing engine.");
+  if (!yaml["yolov5_engine_path"]) {
+    throw std::runtime_error("TensorRT yolov5 requires yolov5_engine_path.");
+  }
+  engine_path_ = yaml["yolov5_engine_path"].as<std::string>();
+  if (engine_path_.empty()) {
+    throw std::runtime_error("TensorRT yolov5_engine_path must not be empty.");
   }
 
   binary_threshold_ = yaml["threshold"].as<double>();
@@ -194,14 +150,7 @@ YOLO::YOLO(const std::string & config_path, bool debug)
   save_path_ = "imgs";
   std::filesystem::create_directory(save_path_);
 
-  tools::infer::TrtOptions trt_options;
-  trt_options.enable_fp16 = yaml["trt_fp16"] ? yaml["trt_fp16"].as<bool>() : true;
-  trt_options.force_rebuild =
-    yaml["trt_force_rebuild"] ? yaml["trt_force_rebuild"].as<bool>() : false;
-  trt_options.workspace_size_bytes = read_workspace_size_bytes(yaml);
-
-  trt_engine_ = std::make_unique<tools::infer::TrtEngine>(
-    model_path_, engine_path_, std::vector<int64_t>{1, 3, 640, 640}, trt_options);
+  trt_engine_ = std::make_unique<tools::infer::TrtEngine>(engine_path_);
 }
 
 std::list<Armor> YOLO::detect(const cv::Mat & raw_img, int frame_count)
@@ -243,7 +192,13 @@ std::list<Armor> YOLO::detect(const cv::Mat & raw_img, int frame_count)
 
   if (trt_engine_->input_is_fp16()) {
     write_chw_rgb_normalized_fp16(input_buffer_, fp16_input_);
-    if (!trt_engine_->infer_fp16(fp16_input_.data(), fp16_input_.size(), raw_output_)) {
+    raw_output_.resize(trt_engine_->output_elements());
+    if (!trt_engine_->infer(
+        fp16_input_.data(),
+        fp16_input_.size() * sizeof(fp16_input_[0]),
+        raw_output_.data(),
+        raw_output_.size() * sizeof(raw_output_[0])))
+    {
       tools::logger()->error("TensorRT yolov5 inference failed.");
       return std::list<Armor>();
     }
@@ -253,7 +208,13 @@ std::list<Armor> YOLO::detect(const cv::Mat & raw_img, int frame_count)
   }
 
   auto chw_input = to_chw_rgb_normalized(input_buffer_);
-  if (!trt_engine_->infer(chw_input.data(), chw_input.size(), raw_output_)) {
+  raw_output_.resize(trt_engine_->output_elements());
+  if (!trt_engine_->infer(
+      chw_input.data(),
+      chw_input.size() * sizeof(chw_input[0]),
+      raw_output_.data(),
+      raw_output_.size() * sizeof(raw_output_[0])))
+  {
     tools::logger()->error("TensorRT yolov5 inference failed.");
     return std::list<Armor>();
   }

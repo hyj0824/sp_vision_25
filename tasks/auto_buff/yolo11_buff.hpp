@@ -1,7 +1,6 @@
 #ifndef AUTO_BUFF__YOLO11_BUFF_HPP
 #define AUTO_BUFF__YOLO11_BUFF_HPP
 
-#include <filesystem>
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include <string>
@@ -37,7 +36,6 @@ private:
   static constexpr int kNumPoints = 6;
   static constexpr int kOutputRows = 5 + kNumPoints * 2;
 
-  std::string model_path_;
   std::string engine_path_;
   std::unique_ptr<tools::infer::TrtEngine> trt_engine_;
 

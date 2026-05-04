@@ -18,58 +18,6 @@ namespace
 constexpr float ConfidenceThreshold = 0.7f;
 constexpr float IouThreshold = 0.4f;
 
-std::string read_model_path(const YAML::Node & yaml)
-{
-  if (yaml["buff_model_path"]) {
-    return yaml["buff_model_path"].as<std::string>();
-  }
-
-  if (yaml["model"]) {
-    tools::logger()->warn("Config key 'model' is deprecated; use 'buff_model_path' instead.");
-    return yaml["model"].as<std::string>();
-  }
-
-  return "";
-}
-
-std::string to_onnx_path(const std::string & model_path)
-{
-  if (model_path.empty()) {
-    return "";
-  }
-
-  std::filesystem::path path(model_path);
-  if (path.extension().string() == ".onnx") {
-    return model_path;
-  }
-
-  const auto fallback = path.replace_extension(".onnx").string();
-  if (std::filesystem::exists(fallback)) {
-    tools::logger()->warn(
-      "buff_model_path={} is not ONNX, fallback to {} for TensorRT build.",
-      model_path,
-      fallback);
-    return fallback;
-  }
-
-  tools::logger()->warn(
-    "buff_model_path={} is not ONNX and no fallback .onnx found. "
-    "Engine-only startup is still possible if buff_engine_path exists.",
-    model_path);
-  return "";
-}
-
-std::string to_default_engine_path(const std::string & path)
-{
-  if (path.empty()) {
-    return "";
-  }
-
-  std::filesystem::path engine_path(path);
-  engine_path.replace_extension(".engine");
-  return engine_path.string();
-}
-
 std::string shape_to_string(const std::vector<int64_t> & shape)
 {
   std::string result = "[";
@@ -83,73 +31,21 @@ std::string shape_to_string(const std::vector<int64_t> & shape)
   return result;
 }
 
-std::string display_path(const std::string & path)
-{
-  return path.empty() ? std::string("<empty>") : path;
-}
-
-std::size_t read_workspace_size_bytes(const YAML::Node & yaml)
-{
-  const auto workspace_mb =
-    yaml["buff_trt_workspace_mb"]
-      ? yaml["buff_trt_workspace_mb"].as<int>()
-      : (yaml["trt_workspace_mb"] ? yaml["trt_workspace_mb"].as<int>() : 1024);
-  if (workspace_mb <= 0) {
-    throw std::runtime_error("trt_workspace_mb must be a positive integer.");
-  }
-
-  return static_cast<std::size_t>(workspace_mb) * 1024ULL * 1024ULL;
-}
-
-bool read_bool(
-  const YAML::Node & yaml, const char * primary, const char * fallback, bool default_value)
-{
-  if (yaml[primary]) {
-    return yaml[primary].as<bool>();
-  }
-
-  if (yaml[fallback]) {
-    return yaml[fallback].as<bool>();
-  }
-
-  return default_value;
-}
-
 }  // namespace
 
 YOLO11_BUFF::YOLO11_BUFF(const std::string & config)
 {
   const auto yaml = YAML::LoadFile(config);
-  const auto configured_model_path = read_model_path(yaml);
 
-  model_path_ = to_onnx_path(configured_model_path);
-  engine_path_ =
-    yaml["buff_engine_path"] ? yaml["buff_engine_path"].as<std::string>()
-                             : to_default_engine_path(
-                                 model_path_.empty() ? configured_model_path : model_path_);
-
-  if (model_path_.empty() && engine_path_.empty()) {
-    throw std::runtime_error(
-      "TensorRT auto_buff requires buff_model_path to resolve to an ONNX file, "
-      "or buff_engine_path to point to an existing engine.");
+  if (!yaml["buff_engine_path"]) {
+    throw std::runtime_error("TensorRT auto_buff requires buff_engine_path.");
+  }
+  engine_path_ = yaml["buff_engine_path"].as<std::string>();
+  if (engine_path_.empty()) {
+    throw std::runtime_error("TensorRT buff_engine_path must not be empty.");
   }
 
-  tools::infer::TrtOptions trt_options;
-  trt_options.enable_fp16 = read_bool(yaml, "buff_trt_fp16", "trt_fp16", true);
-  trt_options.force_rebuild = read_bool(yaml, "buff_trt_force_rebuild", "trt_force_rebuild", false);
-  trt_options.workspace_size_bytes = read_workspace_size_bytes(yaml);
-
-  const bool model_exists = !model_path_.empty() && std::filesystem::exists(model_path_);
-  const bool engine_exists = !engine_path_.empty() && std::filesystem::exists(engine_path_);
-  if ((!engine_exists || trt_options.force_rebuild) && !model_exists) {
-    throw std::runtime_error(
-      "TensorRT auto_buff requires an existing buff_engine_path or an existing ONNX "
-      "buff_model_path for engine build. buff_model_path=" +
-      display_path(model_path_) + ", buff_engine_path=" + display_path(engine_path_));
-  }
-
-  trt_engine_ = std::make_unique<tools::infer::TrtEngine>(
-    model_path_, engine_path_, std::vector<int64_t>{1, 3, kInputSize, kInputSize}, trt_options);
+  trt_engine_ = std::make_unique<tools::infer::TrtEngine>(engine_path_);
 }
 
 std::vector<YOLO11_BUFF::Object> YOLO11_BUFF::get_multicandidateboxes(cv::Mat & image)
@@ -234,7 +130,13 @@ bool YOLO11_BUFF::infer(
   }
 
   const auto input = preprocess(image, scale_to_original);
-  if (!trt_engine_->infer(input.data(), input.size(), raw_output)) {
+  raw_output.resize(trt_engine_->output_elements());
+  if (!trt_engine_->infer(
+      input.data(),
+      input.size() * sizeof(input[0]),
+      raw_output.data(),
+      raw_output.size() * sizeof(raw_output[0])))
+  {
     tools::logger()->error("TensorRT auto_buff inference failed.");
     return false;
   }

@@ -12,14 +12,13 @@ find_path(
 )
 
 find_library(TENSORRT_LIB nvinfer)
-find_library(TENSORRT_ONNXPARSER_LIB nvonnxparser)
 find_library(TENSORRT_PLUGIN_LIB nvinfer_plugin)
 
-if(NOT TENSORRT_INCLUDE_DIR OR NOT TENSORRT_LIB OR NOT TENSORRT_ONNXPARSER_LIB)
+if(NOT TENSORRT_INCLUDE_DIR OR NOT TENSORRT_LIB)
   message(FATAL_ERROR "TensorRT not found. Please install TensorRT dev packages on this platform.")
 endif()
 
-set(TENSORRT_LIBRARIES ${TENSORRT_LIB} ${TENSORRT_ONNXPARSER_LIB})
+set(TENSORRT_LIBRARIES ${TENSORRT_LIB})
 if(TENSORRT_PLUGIN_LIB)
   list(APPEND TENSORRT_LIBRARIES ${TENSORRT_PLUGIN_LIB})
 endif()

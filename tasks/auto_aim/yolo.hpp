@@ -25,7 +25,7 @@ public:
     double scale, cv::Mat & output, const cv::Mat & bgr_img, int frame_count);
 
 private:
-  std::string model_path_, engine_path_;
+  std::string engine_path_;
   std::string save_path_, debug_path_;
   bool debug_, use_roi_, use_traditional_;
 

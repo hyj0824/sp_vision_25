@@ -10,6 +10,16 @@ namespace io::protocol::legacy {
 
 constexpr uint8_t SOF = 0xA5;
 
+// MCU/legacy 串口的姿态约定来自老视觉 artinx-hub:
+//   src/Sensor/CameraBase.cpp::clcTfRobot2Camera
+// 即 Y-up 坐标系：yaw 绕 +Y, pitch 绕 +X, roll 绕 +Z；前 = -Z, 左 = -X。
+// 新视觉是 FLU (X 前 / Y 左 / Z 上)：yaw 绕 +Z, pitch 绕 +Y, roll 绕 +X。
+// 换基矩阵 v_new = kMcuToFlu * v_old，行：new_X=-old_Z, new_Y=-old_X, new_Z=+old_Y。
+inline const Eigen::Matrix3d kMcuToFlu = (Eigen::Matrix3d() <<
+     0,  0, -1,
+    -1,  0,  0,
+     0,  1,  0).finished();
+
 template <float min, float precision>
 inline float decompress_float(uint16_t raw) {
   return static_cast<float>(raw) * precision + min;
@@ -104,12 +114,21 @@ public:
                  float pitch_vel, float pitch_acc) const override {
     assert(len >= sizeof(VisionToGimbal));
 
-    VisionToGimbal tx_data{};
-    tx_data.yaw = compress_float<-4.0f, 0.0005f>(yaw);
-    tx_data.pitch = compress_float<-4.0f, 0.0005f>(pitch);
+    // 视觉给的 yaw/pitch 是 FLU 下的 ZYX；先在 FLU 构造旋转，
+    // 再共轭回 MCU 的 Y-up 帧，最后用 (Y, X, Z) 顺序拆出 MCU 的 yaw/pitch。
+    const Eigen::Matrix3d R_flu =
+        Eigen::AngleAxisd(yaw,   Eigen::Vector3d::UnitZ()).toRotationMatrix() *
+        Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY()).toRotationMatrix();
+    const Eigen::Matrix3d R_mcu = kMcuToFlu.transpose() * R_flu * kMcuToFlu;
+    const Eigen::Vector3d ypr_mcu = tools::eulers(R_mcu, 1, 0, 2, false);
+    const float old_yaw = static_cast<float>(ypr_mcu[0]);
+    const float old_pitch = static_cast<float>(ypr_mcu[1]);
 
-    // 当前 BaseProtocol 参数里没有目标距离；不要留 raw=0，否则下位机会解成
-    // -4.0。
+    VisionToGimbal tx_data{};
+    tx_data.yaw = compress_float<-4.0f, 0.0005f>(old_yaw);
+    tx_data.pitch = compress_float<-4.0f, 0.0005f>(old_pitch);
+
+    // 当前 BaseProtocol 参数里没有目标距离；不要留 raw=0，否则下位机会解成 -4.0。
     tx_data.horizontal_dist = compress_float<-4.0f, 0.0005f>(0.0f);
 
     tx_data.set_flags(fire, control, 0);
@@ -146,13 +165,20 @@ public:
 
     mode_ = static_cast<GimbalMode>(rx_data.color() + 1);
 
-    state_.yaw = yaw;
-    state_.pitch = pitch;
+    // 用 MCU 的轴约定构建旋转：yaw→Y, pitch→X, roll→Z。
+    const Eigen::Matrix3d R_mcu =
+        Eigen::AngleAxisd(yaw,   Eigen::Vector3d::UnitY()).toRotationMatrix() *
+        Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitX()).toRotationMatrix() *
+        Eigen::AngleAxisd(roll,  Eigen::Vector3d::UnitZ()).toRotationMatrix();
+    const Eigen::Matrix3d R_flu = kMcuToFlu * R_mcu * kMcuToFlu.transpose();
+
+    // FLU 下用 intrinsic ZYX 拆出 yaw / pitch 给上层使用。
+    const Eigen::Vector3d ypr_flu = tools::eulers(R_flu, 2, 1, 0, false);
+    state_.yaw = ypr_flu[0];
+    state_.pitch = ypr_flu[1];
     state_.bullet_speed = decompress_float<-1.0f, 0.005f>(rx_data.bullet_speed);
 
-    q_ = Eigen::Quaterniond(
-             tools::rotation_matrix(Eigen::Vector3d(yaw, pitch, roll)))
-             .normalized();
+    q_ = Eigen::Quaterniond(R_flu).normalized();
 
     return true;
   }

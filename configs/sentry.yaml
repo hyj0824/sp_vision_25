@@ -79,6 +79,39 @@ mode: 1
 #####-----buff_detector参数-----#####
 buff_model_path: assets/yolo11_buff_int8.onnx
 buff_engine_path: assets/yolo11_buff_int8.engine
+rune_model_path: assets/2025-07-28-rune.onnx
+rune_engine_path: assets/2025-07-28-rune.engine
+rune_input_width: 640
+rune_input_height: 384
+rune_input_layout: nhwc
+rune_normalize_input: false
+rune_confidence_threshold: 0.7
+rune_delay_time: 0.3
+rune_target_radius: 0.145
+rune_fan_len: 0.7
+rune_min_fit_data_size: 20
+rune_min_shooting_size: 30
+rune_auto_fire: true
+rune_lost_count: 20
+rune_direction_window: 10
+rune_max_fit_data_size: 1200
+rune_fit_interval_frames: 3
+rune_stale_reset_time: 2.0
+rune_center_fallback_time: 0.1
+rune_Qw: 0.2
+rune_Qtheta: 0.08
+rune_Rtheta: 0.4
+rune_reject_pnp_outliers: true
+rune_log_rejected_pnp: false
+rune_pnp_min_distance: 1.0
+rune_pnp_max_distance: 15.0
+rune_pnp_min_depth: 0.5
+rune_pnp_max_reprojection_error: 8.0  # px, 四点重投影 RMS 门控
+rune_pnp_max_distance_jump: 2.5       # m, 仅限制 PnP 距离突变，不限制扇叶角度切换
+rune_pnp_max_angle_rate: 0.0          # rad/s, 0 表示关闭角速度门控
+rune_pnp_angle_gate_max_gap: 0.25
+rune_fit_use_raw_angle: false         # false: 使用滤波角度做 Ceres 拟合
+rune_angle_filter: simple             # simple | legacy_ekf
 
 #####-----工业相机标定参数-----#####
 R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]

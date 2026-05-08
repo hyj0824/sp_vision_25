@@ -1,179 +1,130 @@
 #include <fmt/core.h>
+#include <yaml-cpp/yaml.h>
 
+#include <Eigen/Geometry>
 #include <chrono>
-#include <fstream>
-#include <nlohmann/json.hpp>
-#include <opencv2/opencv.hpp>
+#include <cmath>
+#include <cstdio>
+#include <opencv2/calib3d.hpp>
+#include <opencv2/core.hpp>
+#include <vector>
 
-#include "tasks/auto_buff/buff_aimer.hpp"
-#include "tasks/auto_buff/buff_detector.hpp"
-#include "tasks/auto_buff/buff_solver.hpp"
-#include "tasks/auto_buff/buff_target.hpp"
-#include "tasks/auto_buff/buff_type.hpp"
-#include "tools/exiter.hpp"
-#include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
-#include "tools/math_tools.hpp"
-#include "tools/plotter.hpp"
+#include "tasks/auto_buff/ceres_rune_predictor.hpp"
+
+namespace
+{
 
 const std::string keys =
-  "{help h usage ? |                        | 输出命令行参数说明 }"
-  "{config-path c  | configs/sentry.yaml    | yaml配置文件的路径}"
-  "{start-index s  | 0                      | 视频起始帧下标    }"
-  "{end-index e    | 0                      | 视频结束帧下标    }"
-  "{@input-path    |                        | avi和txt文件的路径}";
+  "{help h usage ? |                       | print this message}"
+  "{config-path c  | configs/standard3.yaml | yaml config path}";
+
+template<typename T>
+T read_yaml(
+  const YAML::Node & yaml, const char * primary, const char * fallback, const T & default_value)
+{
+  if (yaml[primary]) return yaml[primary].as<T>();
+  if (yaml[fallback]) return yaml[fallback].as<T>();
+  return default_value;
+}
+
+cv::Mat camera_matrix_from_yaml(const YAML::Node & yaml)
+{
+  const auto data = yaml["camera_matrix"].as<std::vector<double>>();
+  cv::Mat camera_matrix(3, 3, CV_64F);
+  for (int r = 0; r < 3; ++r) {
+    for (int c = 0; c < 3; ++c) {
+      camera_matrix.at<double>(r, c) = data[static_cast<std::size_t>(r * 3 + c)];
+    }
+  }
+  return camera_matrix;
+}
+
+cv::Mat distort_coeffs_from_yaml(const YAML::Node & yaml)
+{
+  const auto data = yaml["distort_coeffs"].as<std::vector<double>>();
+  cv::Mat distort_coeffs(1, static_cast<int>(data.size()), CV_64F);
+  for (std::size_t i = 0; i < data.size(); ++i) {
+    distort_coeffs.at<double>(0, static_cast<int>(i)) = data[i];
+  }
+  return distort_coeffs;
+}
+
+}  // namespace
 
 int main(int argc, char * argv[])
 {
-  // 读取命令行参数
   cv::CommandLineParser cli(argc, argv, keys);
   if (cli.has("help")) {
     cli.printMessage();
     return 0;
   }
-  auto input_path = cli.get<std::string>(0);
-  auto config_path = cli.get<std::string>("config-path");
-  auto start_index = cli.get<int>("start-index");
-  auto end_index = cli.get<int>("end-index");
 
-  tools::Plotter plotter;
-  tools::Exiter exiter;
+  const auto config_path = cli.get<std::string>("config-path");
+  const auto yaml = YAML::LoadFile(config_path);
+  auto_buff::CeresRunePredictor predictor(config_path);
+  predictor.set_R_gimbal2world(Eigen::Quaterniond::Identity());
 
-  auto video_path = fmt::format("{}.avi", input_path);
-  auto text_path = fmt::format("{}.txt", input_path);
-  cv::VideoCapture video(video_path);
-  std::ifstream text(text_path);
+  const double target_radius = read_yaml(yaml, "rune_target_radius", "target_radius", 0.145);
+  const std::vector<cv::Point3f> object_points = {
+    {0.0f, static_cast<float>(+target_radius), 0.0f},
+    {static_cast<float>(-target_radius), 0.0f, 0.0f},
+    {0.0f, static_cast<float>(-target_radius), 0.0f},
+    {static_cast<float>(+target_radius), 0.0f, 0.0f}};
 
-  auto_buff::Buff_Detector detector(config_path);
-  auto_buff::Solver solver(config_path);
-  // auto_buff::SmallTarget target;
-  auto_buff::BigTarget target;
-  auto_buff::Aimer aimer(config_path);
+  const cv::Mat camera_matrix = camera_matrix_from_yaml(yaml);
+  const cv::Mat distort_coeffs = distort_coeffs_from_yaml(yaml);
+  const cv::Vec3d truth_rvec(0.08, -0.04, 0.20);
+  const cv::Vec3d truth_tvec(0.04, -0.03, 5.0);
 
-  cv::Mat img, drawing;
-  auto t0 = std::chrono::steady_clock::now();
+  std::vector<cv::Point2f> image_points;
+  cv::projectPoints(
+    object_points, truth_rvec, truth_tvec, camera_matrix, distort_coeffs, image_points);
 
-  io::Command last_command;
-  double last_t = -1;
+  const auto timestamp = std::chrono::steady_clock::now();
+  auto_buff::RuneDetection detection;
+  detection.timestamp = timestamp;
+  detection.keypoints = image_points;
+  detection.confidence = 1.0f;
 
-  video.set(cv::CAP_PROP_POS_FRAMES, start_index);
-  for (int i = 0; i < start_index; i++) {
-    double t, w, x, y, z;
-    text >> t >> w >> x >> y >> z;
+  auto_buff::RuneObservation observation;
+  if (!predictor.solve_pnp(detection, observation)) {
+    fmt::print(stderr, "auto_buff_test: solve_pnp failed\n");
+    return 1;
   }
 
-  for (int frame_count = start_index; !exiter.exit(); frame_count++) {
-    if (end_index > 0 && frame_count > end_index) break;
-
-    video.read(img);
-    if (img.empty()) break;
-
-    double t, w, x, y, z;
-    text >> t >> w >> x >> y >> z;
-    auto timestamp = t0 + std::chrono::microseconds(int(t * 1e6));
-
-    /// 自瞄核心逻辑
-
-    solver.set_R_gimbal2world({w, x, y, z});
-
-    auto power_runes = detector.detect(img);
-
-    solver.solve(power_runes);
-
-    target.get_target(power_runes, timestamp);
-
-    auto target_copy = target;
-
-    auto command = aimer.aim(target_copy, timestamp, 22, false);
-
-    // gimbal.send(command);
-
-    // -------------- 调试输出 --------------
-
-    nlohmann::json data;
-
-    // data["bullet_speed"] = gimbal.state().bullet_speed;
-
-    // buff原始观测数据
-    if (power_runes.has_value()) {
-      const auto & p = power_runes.value();
-      data["buff_R_yaw"] = p.ypd_in_world[0];
-      data["buff_R_pitch"] = p.ypd_in_world[1];
-      data["buff_R_dis"] = p.ypd_in_world[2];
-      data["buff_yaw"] = p.ypr_in_world[0] * 57.3;
-      data["buff_pitch"] = p.ypr_in_world[1] * 57.3;
-      data["buff_roll"] = p.ypr_in_world[2] * 57.3;
-    }
-
-    if (!target.is_unsolve()) {
-      auto & p = power_runes.value();
-
-      // 显示
-      for (int i = 0; i < 4; i++) tools::draw_point(img, p.target().points[i]);
-      tools::draw_point(img, p.target().center, {0, 0, 255}, 3);
-      tools::draw_point(img, p.r_center, {0, 0, 255}, 3);
-
-      // 当前帧target更新后buff
-      auto Rxyz_in_world_now = target.point_buff2world(Eigen::Vector3d(0.0, 0.0, 0.0));
-      auto image_points =
-        solver.reproject_buff(Rxyz_in_world_now, target.ekf_x()[4], target.ekf_x()[5]);
-      tools::draw_points(
-        img, std::vector<cv::Point2f>(image_points.begin(), image_points.begin() + 4), {0, 255, 0});
-      tools::draw_points(
-        img, std::vector<cv::Point2f>(image_points.begin() + 4, image_points.end()), {0, 255, 0});
-
-      // buff瞄准位置(预测)
-      double dangle = target.ekf_x()[5] - target_copy.ekf_x()[5];
-      auto Rxyz_in_world_pre = target.point_buff2world(Eigen::Vector3d(0.0, 0.0, 0.0));
-      image_points =
-        solver.reproject_buff(Rxyz_in_world_pre, target_copy.ekf_x()[4], target_copy.ekf_x()[5]);
-      tools::draw_points(
-        img, std::vector<cv::Point2f>(image_points.begin(), image_points.begin() + 4), {255, 0, 0});
-      tools::draw_points(
-        img, std::vector<cv::Point2f>(image_points.begin() + 4, image_points.end()), {255, 0, 0});
-
-      // 观测器内部数据
-      Eigen::VectorXd x = target.ekf_x();
-      data["R_yaw"] = x[0];
-      data["R_V_yaw"] = x[1];
-      data["R_pitch"] = x[2];
-      data["R_dis"] = x[3];
-      data["yaw"] = x[4] * 57.3;
-
-      data["angle"] = x[5] * 57.3;
-      data["spd"] = x[6] * 57.3;
-      if (x.size() >= 10) {
-        data["spd"] = x[6];
-        data["a"] = x[7];
-        data["w"] = x[8];
-        data["fi"] = x[9];
-        data["spd0"] = target.spd;
-      }
-    }
-
-    // 云台响应情况
-    Eigen::Vector3d ypr = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
-    data["gimbal_yaw"] = ypr[0] * 57.3;
-    data["gimbal_pitch"] = -ypr[1] * 57.3;
-
-    if (command.control) {
-      data["cmd_yaw"] = command.yaw * 57.3;
-      data["cmd_pitch"] = command.pitch * 57.3;
-    }
-
-    plotter.plot(data);
-
-    cv::imshow("result", img);
-
-    int key = cv::waitKey(1);
-    if (key == 'q') break;
-    while (key == ' ') {
-      int y = cv::waitKey(30);
-      if (y == 'q') break;
-    }
+  const double t_error = (observation.target_in_camera - Eigen::Vector3d(0.04, -0.03, 5.0)).norm();
+  if (!std::isfinite(observation.distance) || observation.target_in_camera.z() <= 0.0 || t_error > 0.1) {
+    fmt::print(
+      stderr,
+      "auto_buff_test: unexpected PnP result, t=({:.4f}, {:.4f}, {:.4f}), distance={:.4f}, "
+      "t_error={:.4f}\n",
+      observation.target_in_camera.x(), observation.target_in_camera.y(),
+      observation.target_in_camera.z(), observation.distance, t_error);
+    return 1;
   }
-  cv::destroyAllWindows();
-  text.close();  // 关闭文件
 
+  const auto reprojection = predictor.reproject(observation, observation.target_in_world);
+  double max_reprojection_error = 0.0;
+  for (std::size_t i = 0; i < reprojection.size(); ++i) {
+    max_reprojection_error =
+      std::max(max_reprojection_error, static_cast<double>(cv::norm(reprojection[i] - image_points[i])));
+  }
+
+  if (max_reprojection_error > 1.0) {
+    fmt::print(
+      stderr, "auto_buff_test: reprojection error too large: {:.4f}px\n",
+      max_reprojection_error);
+    return 1;
+  }
+
+  const auto updated = predictor.update(detection, timestamp);
+  if (!updated.has_value()) {
+    fmt::print(stderr, "auto_buff_test: predictor.update failed\n");
+    return 1;
+  }
+
+  fmt::print(
+    "auto_buff_test passed: z={:.3f}m, distance={:.3f}m, reprojection={:.3f}px\n",
+    observation.target_in_camera.z(), observation.distance, max_reprojection_error);
   return 0;
 }

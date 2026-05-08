@@ -3,12 +3,18 @@ cmake_minimum_required(VERSION 3.16)
 find_package(Ceres REQUIRED)
 
 add_library(auto_buff OBJECT 
-    buff_type.cpp
-    buff_detector.cpp
-    buff_solver.cpp
-    buff_aimer.cpp
-    buff_target.cpp
-    yolo11_buff.cpp
+    rune_detector.cpp
+    ceres_rune_predictor.cpp
 )
 
-target_link_libraries(auto_buff PUBLIC auto_aim trt_infer ${CERES_LIBRARIES})
+if(TARGET Ceres::ceres)
+    set(AUTO_BUFF_CERES_TARGET Ceres::ceres)
+else()
+    set(AUTO_BUFF_CERES_TARGET ${CERES_LIBRARIES})
+endif()
+
+if(CERES_INCLUDE_DIRS)
+    target_include_directories(auto_buff PUBLIC ${CERES_INCLUDE_DIRS})
+endif()
+
+target_link_libraries(auto_buff PUBLIC trt_infer ${AUTO_BUFF_CERES_TARGET})

@@ -1,30 +1,25 @@
-﻿#include <fmt/format.h>
+#include <fmt/format.h>
 
+#include <chrono>
+#include <nlohmann/json.hpp>
+#include <opencv2/opencv.hpp>
 #include <string>
 
 #include "io/camera.hpp"
 #include "io/gimbal/gimbal.hpp"
-#include "tasks/auto_buff/buff_aimer.hpp"
-#include "tasks/auto_buff/buff_detector.hpp"
-#include "tasks/auto_buff/buff_solver.hpp"
-#include "tasks/auto_buff/buff_target.hpp"
-#include "tasks/auto_buff/buff_type.hpp"
+#include "tasks/auto_buff/ceres_rune_predictor.hpp"
+#include "tasks/auto_buff/rune_detector.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
-#include "tools/logger.hpp"
-#include "tools/math_tools.hpp"
 #include "tools/plotter.hpp"
 #include "tools/recorder.hpp"
-#include "tools/trajectory.hpp"
 
-// 定义命令行参数
 const std::string keys =
-  "{help h usage ? | | 输出命令行参数说明}"
-  "{@config-path   | | yaml配置文件路径 }";
+  "{help h usage ? | | show usage}"
+  "{@config-path   | | yaml config path}";
 
 int main(int argc, char * argv[])
 {
-  // 读取命令行参数
   cv::CommandLineParser cli(argc, argv, keys);
   auto config_path = cli.get<std::string>(0);
   if (cli.has("help") || config_path.empty()) {
@@ -32,124 +27,73 @@ int main(int argc, char * argv[])
     return 0;
   }
 
-  // 初始化绘图器、录制器、退出器
   tools::Plotter plotter;
   tools::Recorder recorder;
   tools::Exiter exiter;
 
-  // 初始化云台、相机
   io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
 
-  // 初始化识别器、解算器、追踪器、瞄准器
-  auto_buff::Buff_Detector detector(config_path);
-  auto_buff::Solver solver(config_path);
-  auto_buff::SmallTarget target;
-  // auto_buff::BigTarget target;
-  auto_buff::Aimer aimer(config_path);
+  auto_buff::RuneDetector detector(config_path);
+  auto_buff::CeresRunePredictor predictor(config_path);
 
   cv::Mat img;
   Eigen::Quaterniond q;
-  std::chrono::steady_clock::time_point t;
+  std::chrono::steady_clock::time_point timestamp;
 
   while (!exiter.exit()) {
-    camera.read(img, t);
-    q = gimbal.q(t);
+    camera.read(img, timestamp);
+    q = gimbal.q(timestamp);
     auto gs = gimbal.state();
-    // recorder.record(img, q, t);
 
-    // -------------- 打符核心逻辑 --------------
+    predictor.set_R_gimbal2world(q);
 
-    solver.set_R_gimbal2world(q);
+    auto detection = detector.detect(img, timestamp);
+    auto observation = predictor.update(detection, timestamp);
 
-    auto power_runes = detector.detect(img);
-
-    solver.solve(power_runes);
-
-    target.get_target(power_runes, t);
-
-    auto target_copy = target;
-
-    auto plan = aimer.mpc_aim(target_copy, t, gs, true);
-
-    gimbal.send(
-      plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
-      plan.pitch_acc);
-    // -------------- 调试输出 --------------
+    const auto rune_mode =
+      gimbal.mode() == io::GimbalMode::BIG_BUFF ? auto_buff::RuneMode::BIG : auto_buff::RuneMode::SMALL;
+    auto command = predictor.aim(rune_mode, timestamp, gs.bullet_speed, true);
+    gimbal.send(command);
 
     nlohmann::json data;
-
-    // buff原始观测数据
-    if (power_runes.has_value()) {
-      const auto & p = power_runes.value();
-      data["buff_R_yaw"] = p.ypd_in_world[0];
-      data["buff_R_pitch"] = p.ypd_in_world[1];
-      data["buff_R_dis"] = p.ypd_in_world[2];
-      data["buff_yaw"] = p.ypr_in_world[0] * 57.3;
-      data["buff_pitch"] = p.ypr_in_world[1] * 57.3;
-      data["buff_roll"] = p.ypr_in_world[2] * 57.3;
-    }
-
-    if (!target.is_unsolve()) {
-      auto & p = power_runes.value();
-
-      // 显示
-      for (int i = 0; i < 4; i++) tools::draw_point(img, p.target().points[i]);
-      tools::draw_point(img, p.target().center, {0, 0, 255}, 3);
-      tools::draw_point(img, p.r_center, {0, 0, 255}, 3);
-
-      // 当前帧target更新后buff
-      auto Rxyz_in_world_now = target.point_buff2world(Eigen::Vector3d(0.0, 0.0, 0.0));
-      auto image_points =
-        solver.reproject_buff(Rxyz_in_world_now, target.ekf_x()[4], target.ekf_x()[5]);
-      tools::draw_points(
-        img, std::vector<cv::Point2f>(image_points.begin(), image_points.begin() + 4), {0, 255, 0});
-      tools::draw_points(
-        img, std::vector<cv::Point2f>(image_points.begin() + 4, image_points.end()), {0, 255, 0});
-
-      // buff瞄准位置(预测)
-      double dangle = target.ekf_x()[5] - target_copy.ekf_x()[5];
-      auto Rxyz_in_world_pre = target.point_buff2world(Eigen::Vector3d(0.0, 0.0, 0.0));
-      image_points =
-        solver.reproject_buff(Rxyz_in_world_pre, target_copy.ekf_x()[4], target_copy.ekf_x()[5]);
-      tools::draw_points(
-        img, std::vector<cv::Point2f>(image_points.begin(), image_points.begin() + 4), {255, 0, 0});
-      tools::draw_points(
-        img, std::vector<cv::Point2f>(image_points.begin() + 4, image_points.end()), {255, 0, 0});
-
-      // 观测器内部数据
-      Eigen::VectorXd x = target.ekf_x();
-      data["R_yaw"] = x[0];
-      data["R_V_yaw"] = x[1];
-      data["R_pitch"] = x[2];
-      data["R_dis"] = x[3];
-      data["yaw"] = x[4] * 57.3;
-
-      data["angle"] = x[5] * 57.3;
-      data["spd"] = x[6] * 57.3;
-      if (x.size() >= 10) {
-        data["spd"] = x[6];
-        data["a"] = x[7];
-        data["w"] = x[8];
-        data["fi"] = x[9];
-        data["spd0"] = target.spd;
-      }
-    }
-
-    // 云台响应情况
     data["gimbal_yaw"] = gs.yaw * 57.3;
     data["gimbal_pitch"] = gs.pitch * 57.3;
     data["gimbal_yaw_vel"] = gs.yaw_vel * 57.3;
     data["gimbal_pitch_vel"] = gs.pitch_vel * 57.3;
+    data["bullet_speed"] = gs.bullet_speed;
 
-    if (plan.control) {
-      data["plan_yaw"] = plan.yaw * 57.3;
-      data["plan_pitch"] = plan.pitch * 57.3;
-      data["plan_yaw_vel"] = plan.yaw_vel * 57.3;
-      data["plan_pitch_vel"] = plan.pitch_vel * 57.3;
-      data["plan_yaw_acc"] = plan.yaw_acc * 57.3;
-      data["plan_pitch_acc"] = plan.pitch_acc * 57.3;
-      data["shoot"] = plan.fire ? 1 : 0;
+    if (detection.has_value()) {
+      data["rune_conf"] = detection->confidence;
+      for (std::size_t i = 0; i < detection->keypoints.size(); ++i) {
+        tools::draw_point(img, detection->keypoints[i]);
+        cv::putText(
+          img, std::to_string(i), detection->keypoints[i], cv::FONT_HERSHEY_SIMPLEX, 0.8,
+          cv::Scalar(255, 255, 255), 2);
+      }
+    }
+
+    if (observation.has_value()) {
+      data["rune_dis"] = observation->distance;
+      data["rune_x"] = observation->target_in_world.x();
+      data["rune_y"] = observation->target_in_world.y();
+      data["rune_z"] = observation->target_in_world.z();
+    }
+
+    const auto & debug = predictor.debug();
+    if (debug.valid) {
+      data["aim_yaw"] = debug.yaw * 57.3;
+      data["aim_pitch"] = debug.pitch * 57.3;
+      data["predict_angle"] = debug.predict_rotation * 57.3;
+      data["fly_time"] = debug.fly_time;
+      data["fit_size"] = debug.fit_data_size;
+      data["direction"] = debug.direction;
+    }
+
+    if (command.control) {
+      data["cmd_yaw"] = command.yaw * 57.3;
+      data["cmd_pitch"] = command.pitch * 57.3;
+      data["shoot"] = command.shoot ? 1 : 0;
     }
 
     plotter.plot(data);

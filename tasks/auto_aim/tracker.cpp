@@ -2,6 +2,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <numeric>
 #include <tuple>
 
 #include "tools/logger.hpp"
@@ -9,6 +10,20 @@
 
 namespace auto_aim
 {
+namespace
+{
+
+Eigen::VectorXd make_vector11(
+  double x0, double x1, double x2, double x3, double x4, double x5, double x6, double x7,
+  double x8, double x9, double x10)
+{
+  Eigen::VectorXd v(11);
+  v << x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10;
+  return v;
+}
+
+}  // namespace
+
 Tracker::Tracker(const std::string & config_path, Solver & solver)
 : solver_{solver},
   detect_count_(0),
@@ -241,22 +256,22 @@ bool Tracker::set_target(std::list<Armor> & armors, std::chrono::steady_clock::t
                      armor.name == ArmorName::five);
 
   if (is_balance) {
-    Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 64, 0.4, 100, 1, 1, 1}};
+    Eigen::VectorXd P0_dig = make_vector11(1, 64, 1, 64, 1, 64, 0.4, 100, 1, 1, 1);
     target_ = Target(armor, t, 0.2, 2, P0_dig);
   }
 
   else if (armor.name == ArmorName::outpost) {
-    Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 81, 0.4, 100, 1e-4, 0, 0}};
+    Eigen::VectorXd P0_dig = make_vector11(1, 64, 1, 64, 1, 81, 0.4, 100, 1e-4, 0, 0);
     target_ = Target(armor, t, 0.2765, 3, P0_dig);
   }
 
   else if (armor.name == ArmorName::base) {
-    Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 64, 0.4, 100, 1e-4, 0, 0}};
+    Eigen::VectorXd P0_dig = make_vector11(1, 64, 1, 64, 1, 64, 0.4, 100, 1e-4, 0, 0);
     target_ = Target(armor, t, 0.3205, 3, P0_dig);
   }
 
   else {
-    Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 64, 0.4, 100, 1, 1, 1}};
+    Eigen::VectorXd P0_dig = make_vector11(1, 64, 1, 64, 1, 64, 0.4, 100, 1, 1, 1);
     target_ = Target(armor, t, 0.2, 4, P0_dig);
   }
 

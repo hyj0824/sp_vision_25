@@ -20,13 +20,11 @@ inline const Eigen::Matrix3d kMcuToFlu = (Eigen::Matrix3d() <<
     -1,  0,  0,
      0,  1,  0).finished();
 
-template <float min, float precision>
-inline float decompress_float(uint16_t raw) {
+inline float decompress_float(uint16_t raw, float min, float precision) {
   return static_cast<float>(raw) * precision + min;
 }
 
-template <float min, float precision>
-inline uint16_t compress_float(float data) {
+inline uint16_t compress_float(float data, float min, float precision) {
   assert(data >= min);
   assert(data <= min + 65535.0f * precision);
   return static_cast<uint16_t>((data - min) / precision);
@@ -125,11 +123,11 @@ public:
     const float old_pitch = static_cast<float>(ypr_mcu[1]);
 
     VisionToGimbal tx_data{};
-    tx_data.yaw = compress_float<-4.0f, 0.0005f>(old_yaw);
-    tx_data.pitch = compress_float<-4.0f, 0.0005f>(old_pitch);
+    tx_data.yaw = compress_float(old_yaw, -4.0f, 0.0005f);
+    tx_data.pitch = compress_float(old_pitch, -4.0f, 0.0005f);
 
     // 当前 BaseProtocol 参数里没有目标距离；不要留 raw=0，否则下位机会解成 -4.0。
-    tx_data.horizontal_dist = compress_float<-4.0f, 0.0005f>(0.0f);
+    tx_data.horizontal_dist = compress_float(0.0f, -4.0f, 0.0005f);
 
     tx_data.set_flags(fire, control, 0);
 
@@ -159,9 +157,9 @@ public:
       return false;
     }
 
-    const float yaw = decompress_float<-4.0f, 0.0005f>(rx_data.yaw);
-    const float pitch = decompress_float<-4.0f, 0.0005f>(rx_data.pitch);
-    const float roll = decompress_float<-4.0f, 0.0005f>(rx_data.roll);
+    const float yaw = decompress_float(rx_data.yaw, -4.0f, 0.0005f);
+    const float pitch = decompress_float(rx_data.pitch, -4.0f, 0.0005f);
+    const float roll = decompress_float(rx_data.roll, -4.0f, 0.0005f);
 
     mode_ = static_cast<GimbalMode>(rx_data.color() + 1);
 
@@ -176,7 +174,7 @@ public:
     const Eigen::Vector3d ypr_flu = tools::eulers(R_flu, 2, 1, 0, false);
     state_.yaw = ypr_flu[0];
     state_.pitch = ypr_flu[1];
-    state_.bullet_speed = decompress_float<-1.0f, 0.005f>(rx_data.bullet_speed);
+    state_.bullet_speed = decompress_float(rx_data.bullet_speed, -1.0f, 0.005f);
 
     q_ = Eigen::Quaterniond(R_flu).normalized();
 

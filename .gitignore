@@ -8,6 +8,7 @@ build/
 build-*/
 Camera/
 logs/
+outputs/
 assets/img_with_q/
 records/
 records_auto_buff_big/

@@ -45,7 +45,9 @@ static void print_matrix(FILE *f, MatrixXd mat, int num_elements)
     
     // Matrix is properly initialized and has enough elements
     for (int i = 0; i < num_elements; i++) {
-        fprintf(f, "(tinytype)%.16f", mat.reshaped<RowMajor>()[i]);
+        const int row = i / mat.cols();
+        const int col = i % mat.cols();
+        fprintf(f, "(tinytype)%.16f", mat(row, col));
         if (i < num_elements - 1)
             fprintf(f, ",");
     }

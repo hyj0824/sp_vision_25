@@ -5,16 +5,23 @@ find_package(yaml-cpp REQUIRED)
 add_subdirectory(serial)
 
 # 创建目标 io
-add_library(io STATIC 
-    hikrobot/hikrobot.cpp    
+set(IO_SOURCES
     mindvision/mindvision.cpp  
     usbcamera/usbcamera.cpp  
     camera.cpp
     gimbal/gimbal.cpp
 )
 
+if (DEFINED ENV{MVCAM_SDK_PATH})
+    list(APPEND IO_SOURCES hikrobot/hikrobot.cpp)
+endif ()
+
+# 创建目标 io
+add_library(io STATIC ${IO_SOURCES})
+
 # HIK SDK
 if (DEFINED ENV{MVCAM_SDK_PATH})
+    target_compile_definitions(io PUBLIC IO_ENABLE_HIKROBOT)
     target_include_directories(io PUBLIC $ENV{MVCAM_SDK_PATH}/include)
     if (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "aarch64")
         target_link_directories(io PUBLIC $ENV{MVCAM_SDK_PATH}/lib/aarch64)

@@ -107,6 +107,12 @@ target_link_libraries(minimum_vision_system ${OpenCV_LIBS} fmt::fmt yaml-cpp too
 if(BUILD_AUTO_BUFF)
   add_executable(auto_buff_test tests/auto_buff_test.cpp)
   target_link_libraries(auto_buff_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
+
+  add_executable(rune_offline_predict tools/offline_rune_predict.cpp)
+  target_link_libraries(rune_offline_predict ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
+
+  add_executable(rune_video_test tools/rune_video_test.cpp)
+  target_link_libraries(rune_video_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
 endif()
 
 add_executable(gimbal_test tests/gimbal_test.cpp)

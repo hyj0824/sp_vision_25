@@ -2,6 +2,7 @@
 #define TOOLS__RECORDER_HPP
 
 #include <Eigen/Geometry>
+#include <atomic>
 #include <chrono>
 #include <fstream>
 #include <opencv2/opencv.hpp>

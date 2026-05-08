@@ -4,10 +4,17 @@
 #define TOOLS_TRT_AVAILABLE 1
 #include <NvInfer.h>
 #include <NvOnnxParser.h>
+#if __has_include(<NvInferPlugin.h>)
+#include <NvInferPlugin.h>
+#define TOOLS_TRT_PLUGIN_HEADER_AVAILABLE 1
+#else
+#define TOOLS_TRT_PLUGIN_HEADER_AVAILABLE 0
+#endif
 #include <cuda_fp16.h>
 #include <cuda_runtime_api.h>
 #else
 #define TOOLS_TRT_AVAILABLE 0
+#define TOOLS_TRT_PLUGIN_HEADER_AVAILABLE 0
 #endif
 
 #include <spdlog/spdlog.h>
@@ -273,6 +280,10 @@ TrtEngine::TrtEngine(
   if (engine_path.empty()) {
     throw std::runtime_error("TensorRT engine path must not be empty.");
   }
+
+#if TOOLS_TRT_PLUGIN_HEADER_AVAILABLE
+  initLibNvInferPlugins(&g_trt_logger, "");
+#endif
 
   if (!build_or_load_engine(onnx_path, engine_path, input_shape, options)) {
     throw std::runtime_error("Failed to initialize TensorRT engine.");
@@ -569,7 +580,12 @@ bool TrtEngine::build_engine(
     return false;
   }
 
-  constexpr auto network_flags = 0U;
+  const auto network_flags =
+#if defined(NV_TENSORRT_MAJOR) && NV_TENSORRT_MAJOR < 10
+    1U << static_cast<unsigned int>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
+#else
+    0U;
+#endif
 
   auto network =
     std::unique_ptr<nvinfer1::INetworkDefinition, TrtDeleter<nvinfer1::INetworkDefinition>>(

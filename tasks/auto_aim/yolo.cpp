@@ -1,6 +1,6 @@
 #include "yolo.hpp"
 
-#include <fmt/chrono.h>
+#include <fmt/core.h>
 #include <yaml-cpp/yaml.h>
 
 #include <array>
@@ -11,6 +11,7 @@
 
 #include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
+#include "tools/math_tools.hpp"
 
 namespace auto_aim
 {
@@ -409,7 +410,7 @@ void YOLO::draw_detections(
 
 void YOLO::save(const Armor & armor) const
 {
-  auto file_name = fmt::format("{:%Y-%m-%d_%H-%M-%S}", std::chrono::system_clock::now());
+  auto file_name = tools::timestamp_string();
   auto img_path = fmt::format("{}/{}_{}.jpg", save_path_, armor.name, file_name);
   cv::imwrite(img_path, tmp_img_);
 }

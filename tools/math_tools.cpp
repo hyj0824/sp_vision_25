@@ -1,7 +1,10 @@
 #include "math_tools.hpp"
 
 #include <cmath>
+#include <ctime>
+#include <iomanip>
 #include <opencv2/core.hpp>  // CV_PI
+#include <sstream>
 
 namespace tools
 {
@@ -90,12 +93,11 @@ Eigen::Matrix3d rotation_matrix(const Eigen::Vector3d & ypr)
   double sin_pitch = sin(pitch);
   double cos_roll = cos(roll);
   double sin_roll = sin(roll);
+  Eigen::Matrix3d R;
   // clang-format off
-    Eigen::Matrix3d R{
-      {cos_yaw * cos_pitch, cos_yaw * sin_pitch * sin_roll - sin_yaw * cos_roll, cos_yaw * sin_pitch * cos_roll + sin_yaw * sin_roll},
-      {sin_yaw * cos_pitch, sin_yaw * sin_pitch * sin_roll + cos_yaw * cos_roll, sin_yaw * sin_pitch * cos_roll - cos_yaw * sin_roll},
-      {         -sin_pitch,                                cos_pitch * sin_roll,                                cos_pitch * cos_roll}
-    };
+  R << cos_yaw * cos_pitch, cos_yaw * sin_pitch * sin_roll - sin_yaw * cos_roll, cos_yaw * sin_pitch * cos_roll + sin_yaw * sin_roll,
+       sin_yaw * cos_pitch, sin_yaw * sin_pitch * sin_roll + cos_yaw * cos_roll, sin_yaw * sin_pitch * cos_roll - cos_yaw * sin_roll,
+                -sin_pitch,                                cos_pitch * sin_roll,                                cos_pitch * cos_roll;
   // clang-format on
   return R;
 }
@@ -125,12 +127,11 @@ Eigen::MatrixXd xyz2ypd_jacobian(const Eigen::Vector3d & xyz)
   auto ddistance_dy = y / std::pow((x * x + y * y + z * z), 0.5);
   auto ddistance_dz = z / std::pow((x * x + y * y + z * z), 0.5);
 
+  Eigen::MatrixXd J(3, 3);
   // clang-format off
-  Eigen::MatrixXd J{
-    {dyaw_dx, dyaw_dy, dyaw_dz},
-    {dpitch_dx, dpitch_dy, dpitch_dz},
-    {ddistance_dx, ddistance_dy, ddistance_dz}
-  };
+  J << dyaw_dx,       dyaw_dy,       dyaw_dz,
+       dpitch_dx,     dpitch_dy,     dpitch_dz,
+       ddistance_dx,  ddistance_dy,  ddistance_dz;
   // clang-format on
 
   return J;
@@ -165,12 +166,11 @@ Eigen::MatrixXd ypd2xyz_jacobian(const Eigen::Vector3d & ypd)
   auto dy_ddistance = cos_pitch * sin_yaw;
   auto dz_ddistance = sin_pitch;
 
+  Eigen::MatrixXd J(3, 3);
   // clang-format off
-  Eigen::MatrixXd J{
-    {dx_dyaw, dx_dpitch, dx_ddistance},
-    {dy_dyaw, dy_dpitch, dy_ddistance},
-    {dz_dyaw, dz_dpitch, dz_ddistance}
-  };
+  J << dx_dyaw, dx_dpitch, dx_ddistance,
+       dy_dyaw, dy_dpitch, dy_ddistance,
+       dz_dyaw, dz_dpitch, dz_ddistance;
   // clang-format on
 
   return J;
@@ -181,6 +181,22 @@ double delta_time(
 {
   std::chrono::duration<double> c = a - b;
   return c.count();
+}
+
+std::string timestamp_string()
+{
+  const auto now = std::chrono::system_clock::now();
+  const auto time = std::chrono::system_clock::to_time_t(now);
+  std::tm local_time{};
+#if defined(_WIN32)
+  localtime_s(&local_time, &time);
+#else
+  localtime_r(&time, &local_time);
+#endif
+
+  std::ostringstream ss;
+  ss << std::put_time(&local_time, "%Y-%m-%d_%H-%M-%S");
+  return ss.str();
 }
 
 double get_abs_angle(const Eigen::Vector2d & vec1, const Eigen::Vector2d & vec2)

@@ -114,9 +114,11 @@ void Planner::setup_yaw_solver(const std::string & config_path)
   auto Q_yaw = tools::read<std::vector<double>>(yaml, "Q_yaw");
   auto R_yaw = tools::read<std::vector<double>>(yaml, "R_yaw");
 
-  Eigen::MatrixXd A{{1, DT}, {0, 1}};
-  Eigen::MatrixXd B{{0}, {DT}};
-  Eigen::VectorXd f{{0, 0}};
+  Eigen::MatrixXd A(2, 2);
+  A << 1, DT, 0, 1;
+  Eigen::MatrixXd B(2, 1);
+  B << 0, DT;
+  Eigen::VectorXd f = Eigen::VectorXd::Zero(2);
   Eigen::Matrix<double, 2, 1> Q(Q_yaw.data());
   Eigen::Matrix<double, 1, 1> R(R_yaw.data());
   tiny_setup(&yaw_solver_, A, B, f, Q.asDiagonal(), R.asDiagonal(), 1.0, 2, 1, HORIZON, 0);
@@ -137,9 +139,11 @@ void Planner::setup_pitch_solver(const std::string & config_path)
   auto Q_pitch = tools::read<std::vector<double>>(yaml, "Q_pitch");
   auto R_pitch = tools::read<std::vector<double>>(yaml, "R_pitch");
 
-  Eigen::MatrixXd A{{1, DT}, {0, 1}};
-  Eigen::MatrixXd B{{0}, {DT}};
-  Eigen::VectorXd f{{0, 0}};
+  Eigen::MatrixXd A(2, 2);
+  A << 1, DT, 0, 1;
+  Eigen::MatrixXd B(2, 1);
+  B << 0, DT;
+  Eigen::VectorXd f = Eigen::VectorXd::Zero(2);
   Eigen::Matrix<double, 2, 1> Q(Q_pitch.data());
   Eigen::Matrix<double, 1, 1> R(R_pitch.data());
   tiny_setup(&pitch_solver_, A, B, f, Q.asDiagonal(), R.asDiagonal(), 1.0, 2, 1, HORIZON, 0);

@@ -105,18 +105,46 @@ IMU型号：使用下位机内置IMU，通过串口上传姿态\
 
     - `auto_aim` 的 `yolov5` 推理统一使用 `YOLO::detect` 入口。
     - `auto_aim` 中旧的 `yolov8/yolo11` 实现已移除，不再可选。
-    - `auto_buff`（含 `yolo11_buff`）已迁移到 TensorRT（可通过 `BUILD_AUTO_BUFF=OFF` 关闭）。
+    - `auto_buff`（含 `yolo11_buff` 与新迁移的 rune 四点模型）已迁移到 TensorRT（可通过 `BUILD_AUTO_BUFF=OFF` 关闭）。
     - 首次运行若不存在 `yolov5_engine_path`，程序会尝试由 ONNX 自动构建 engine。TensorRT engine 与 GPU/平台绑定，不建议提交到仓库。
+    - Jetson Orin NX 的依赖安装、TensorRT/Ceres 配置和验证命令见 [docs/jetson_orin_nx_auto_buff_setup.md](docs/jetson_orin_nx_auto_buff_setup.md)。
     - 建议在配置中使用：
         - `yolov5_model_path: assets/0526.onnx`
         - `yolov5_engine_path: assets/0526.engine`
         - `trt_fp16: true`
         - `trt_force_rebuild: false`
         - `trt_workspace_mb: 1024`
-    - `auto_buff` 建议在配置中使用：
+    - 旧 `yolo11_buff` 配置：
         - `buff_model_path: assets/yolo11_buff_int8.onnx`
         - `buff_engine_path: assets/yolo11_buff_int8.engine`
         - 模型输出需保持 6 个关键点布局（即 `1x17x8400` 或等价转置）。
+    - 新 rune 识别与预测配置：
+        - `rune_model_path: assets/2025-07-28-rune.onnx`
+        - `rune_engine_path: assets/2025-07-28-rune.engine`
+        - `rune_input_width: 640`
+        - `rune_input_height: 384`
+        - `rune_input_layout: nhwc`
+        - `rune_normalize_input: false`
+        - `rune_confidence_threshold: 0.7`
+        - `rune_delay_time: 0.3`
+        - `rune_target_radius: 0.145`
+        - `rune_fan_len: 0.7`
+        - `rune_min_fit_data_size: 20`
+        - `rune_min_shooting_size: 30`
+    - rune PnP 几何门控：
+        - `rune_reject_pnp_outliers: true`
+        - `rune_pnp_min_distance: 1.0`
+        - `rune_pnp_max_distance: 15.0`
+        - `rune_pnp_min_depth: 0.5`
+        - `rune_pnp_max_reprojection_error: 8.0`：四个 PnP 模型点重投影 RMS 误差门控，单位 px。
+        - `rune_pnp_max_distance_jump: 2.5`：只检查相邻有效 PnP 的距离突变，单位 m；它不限制扇叶角度切换。
+        - `rune_pnp_max_angle_rate: 0.0`：角速度门控，0 表示关闭。
+        - `rune_pnp_angle_gate_max_gap: 0.25`
+    - rune 拟合与滤波：
+        - `rune_angle_filter: simple`，可切换为 `legacy_ekf` 做 A/B 测试。
+        - `rune_fit_use_raw_angle: false`，默认使用滤波后的相对角进入 Ceres 拟合。
+        - `rune_Qw: 0.2`、`rune_Qtheta: 0.08`、`rune_Rtheta: 0.4` 控制角度滤波过程噪声和观测噪声。
+        - `rune_fit_interval_frames: 3`、`rune_max_fit_data_size: 1200` 控制 Ceres 拟合频率和滑窗长度。
 
 4. systemd 自启：
     1. 建议将项目目录软链接到固定路径，便于 service 文件保持稳定：
@@ -197,6 +225,9 @@ IMU型号：使用下位机内置IMU，通过串口上传姿态\
         # Expected output (example):
         # lrwxrwxrwx 1 root root 7 Jul 21 10:00 /dev/gimbal -> ttyACM0
         ```
+
+    6. yaw/pitch 坐标约定
+        上层算法统一通过 `io::Command` 下发弧度制的 yaw/pitch。自瞄和 rune 都使用 FLU 世界/云台约定：X 前、Y 左、Z 上，yaw 为绕 +Z 的水平角，pitch 与现有自瞄保持一致，向上为负。`neo` 协议原样收发这组 yaw/pitch；`legacy` 协议在协议层完成 FLU 与旧下位机 Y-up 坐标系的换基，因此上层不需要为不同协议分别改符号。
 
 ### 3.3 数据流图
 视觉相关模块如图3.1所示。其中，相机线程产生图像、时间戳，通过下位机线程获取对应的云台姿态四元数；图像经过识别器，获得装甲板的四个顶点像素坐标，以及其图案类别；估计器根据装甲板信息，获得目标单位的运动状态；决策器则根据当前的目标运动状态信息，预测目标的运动轨迹，从而判断最佳瞄准位置和最佳开火时机，形成指令发送给下位机；最后控制器和执行机构则根据该指令进行执行，从而完成一个完整的自瞄流程。

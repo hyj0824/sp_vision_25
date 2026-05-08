@@ -36,7 +36,8 @@ Target::Target(
   // w: angular velocity
   // l: r2 - r1
   // h: z2 - z1
-  Eigen::VectorXd x0{{center_x, 0, center_y, 0, center_z, 0, ypr[0], 0, r, 0, 0}};  //初始化预测量
+  Eigen::VectorXd x0(11);  //初始化预测量
+  x0 << center_x, 0, center_y, 0, center_z, 0, ypr[0], 0, r, 0, 0;
   Eigen::MatrixXd P0 = P0_dig.asDiagonal();
 
   // 防止夹角求和出现异常值
@@ -51,8 +52,9 @@ Target::Target(
 
 Target::Target(double x, double vyaw, double radius, double h) : armor_num_(4)
 {
-  Eigen::VectorXd x0{{x, 0, 0, 0, 0, 0, 0, vyaw, radius, 0, h}};
-  Eigen::VectorXd P0_dig{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
+  Eigen::VectorXd x0(11);
+  x0 << x, 0, 0, 0, 0, 0, 0, vyaw, radius, 0, h;
+  Eigen::VectorXd P0_dig = Eigen::VectorXd::Zero(11);
   Eigen::MatrixXd P0 = P0_dig.asDiagonal();
 
   // 防止夹角求和出现异常值
@@ -75,20 +77,19 @@ void Target::predict(std::chrono::steady_clock::time_point t)
 void Target::predict(double dt)
 {
   // 状态转移矩阵
+  Eigen::MatrixXd F(11, 11);
   // clang-format off
-  Eigen::MatrixXd F{
-    {1, dt,  0,  0,  0,  0,  0,  0,  0,  0,  0},
-    {0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0},
-    {0,  0,  1, dt,  0,  0,  0,  0,  0,  0,  0},
-    {0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0},
-    {0,  0,  0,  0,  1, dt,  0,  0,  0,  0,  0},
-    {0,  0,  0,  0,  0,  1,  0,  0,  0,  0,  0},
-    {0,  0,  0,  0,  0,  0,  1, dt,  0,  0,  0},
-    {0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0},
-    {0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0},
-    {0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0},
-    {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1}
-  };
+  F << 1, dt,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+       0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+       0,  0,  1, dt,  0,  0,  0,  0,  0,  0,  0,
+       0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,
+       0,  0,  0,  0,  1, dt,  0,  0,  0,  0,  0,
+       0,  0,  0,  0,  0,  1,  0,  0,  0,  0,  0,
+       0,  0,  0,  0,  0,  0,  1, dt,  0,  0,  0,
+       0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,
+       0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,
+       0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,
+       0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1;
   // clang-format on
 
   // Piecewise White Noise Model
@@ -105,20 +106,19 @@ void Target::predict(double dt)
   auto b = dt * dt * dt / 2;
   auto c = dt * dt;
   // 预测过程噪声偏差的方差
+  Eigen::MatrixXd Q(11, 11);
   // clang-format off
-  Eigen::MatrixXd Q{
-    {a * v1, b * v1,      0,      0,      0,      0,      0,      0, 0, 0, 0},
-    {b * v1, c * v1,      0,      0,      0,      0,      0,      0, 0, 0, 0},
-    {     0,      0, a * v1, b * v1,      0,      0,      0,      0, 0, 0, 0},
-    {     0,      0, b * v1, c * v1,      0,      0,      0,      0, 0, 0, 0},
-    {     0,      0,      0,      0, a * v1, b * v1,      0,      0, 0, 0, 0},
-    {     0,      0,      0,      0, b * v1, c * v1,      0,      0, 0, 0, 0},
-    {     0,      0,      0,      0,      0,      0, a * v2, b * v2, 0, 0, 0},
-    {     0,      0,      0,      0,      0,      0, b * v2, c * v2, 0, 0, 0},
-    {     0,      0,      0,      0,      0,      0,      0,      0, 0, 0, 0},
-    {     0,      0,      0,      0,      0,      0,      0,      0, 0, 0, 0},
-    {     0,      0,      0,      0,      0,      0,      0,      0, 0, 0, 0}
-  };
+  Q << a * v1, b * v1,      0,      0,      0,      0,      0,      0, 0, 0, 0,
+       b * v1, c * v1,      0,      0,      0,      0,      0,      0, 0, 0, 0,
+            0,      0, a * v1, b * v1,      0,      0,      0,      0, 0, 0, 0,
+            0,      0, b * v1, c * v1,      0,      0,      0,      0, 0, 0, 0,
+            0,      0,      0,      0, a * v1, b * v1,      0,      0, 0, 0, 0,
+            0,      0,      0,      0, b * v1, c * v1,      0,      0, 0, 0, 0,
+            0,      0,      0,      0,      0,      0, a * v2, b * v2, 0, 0, 0,
+            0,      0,      0,      0,      0,      0, b * v2, c * v2, 0, 0, 0,
+            0,      0,      0,      0,      0,      0,      0,      0, 0, 0, 0,
+            0,      0,      0,      0,      0,      0,      0,      0, 0, 0, 0,
+            0,      0,      0,      0,      0,      0,      0,      0, 0, 0, 0;
   // clang-format on
 
   // 防止夹角求和出现异常值
@@ -191,9 +191,9 @@ void Target::update_ypda(const Armor & armor, int id)
   // Eigen::VectorXd R_dig{{4e-3, 4e-3, 1, 9e-2}};
   auto center_yaw = std::atan2(armor.xyz_in_world[1], armor.xyz_in_world[0]);
   auto delta_angle = tools::limit_rad(armor.ypr_in_world[0] - center_yaw);
-  Eigen::VectorXd R_dig{
-    {4e-3, 4e-3, log(std::abs(delta_angle) + 1) + 1,
-     log(std::abs(armor.ypd_in_world[2]) + 1) / 200 + 9e-2}};
+  Eigen::VectorXd R_dig(4);
+  R_dig << 4e-3, 4e-3, log(std::abs(delta_angle) + 1) + 1,
+    log(std::abs(armor.ypd_in_world[2]) + 1) / 200 + 9e-2;
 
   //测量过程噪声偏差的方差
   Eigen::MatrixXd R = R_dig.asDiagonal();
@@ -217,7 +217,8 @@ void Target::update_ypda(const Armor & armor, int id)
 
   const Eigen::VectorXd & ypd = armor.ypd_in_world;
   const Eigen::VectorXd & ypr = armor.ypr_in_world;
-  Eigen::VectorXd z{{ypd[0], ypd[1], ypd[2], ypr[0]}};  //获得观测量
+  Eigen::VectorXd z(4);  //获得观测量
+  z << ypd[0], ypd[1], ypd[2], ypr[0];
 
   ekf_.update(z, H, R, h, z_subtract);
 }
@@ -293,24 +294,22 @@ Eigen::MatrixXd Target::h_jacobian(const Eigen::VectorXd & x, int id) const
 
   auto dz_dh = (use_l_h) ? 1.0 : 0.0;
 
+  Eigen::MatrixXd H_armor_xyza(4, 11);
   // clang-format off
-  Eigen::MatrixXd H_armor_xyza{
-    {1, 0, 0, 0, 0, 0, dx_da, 0, dx_dr, dx_dl,     0},
-    {0, 0, 1, 0, 0, 0, dy_da, 0, dy_dr, dy_dl,     0},
-    {0, 0, 0, 0, 1, 0,     0, 0,     0,     0, dz_dh},
-    {0, 0, 0, 0, 0, 0,     1, 0,     0,     0,     0}
-  };
+  H_armor_xyza << 1, 0, 0, 0, 0, 0, dx_da, 0, dx_dr, dx_dl,     0,
+                  0, 0, 1, 0, 0, 0, dy_da, 0, dy_dr, dy_dl,     0,
+                  0, 0, 0, 0, 1, 0,     0, 0,     0,     0, dz_dh,
+                  0, 0, 0, 0, 0, 0,     1, 0,     0,     0,     0;
   // clang-format on
 
   Eigen::VectorXd armor_xyz = h_armor_xyz(x, id);
   Eigen::MatrixXd H_armor_ypd = tools::xyz2ypd_jacobian(armor_xyz);
+  Eigen::MatrixXd H_armor_ypda(4, 4);
   // clang-format off
-  Eigen::MatrixXd H_armor_ypda{
-    {H_armor_ypd(0, 0), H_armor_ypd(0, 1), H_armor_ypd(0, 2), 0},
-    {H_armor_ypd(1, 0), H_armor_ypd(1, 1), H_armor_ypd(1, 2), 0},
-    {H_armor_ypd(2, 0), H_armor_ypd(2, 1), H_armor_ypd(2, 2), 0},
-    {                0,                 0,                 0, 1}
-  };
+  H_armor_ypda << H_armor_ypd(0, 0), H_armor_ypd(0, 1), H_armor_ypd(0, 2), 0,
+                  H_armor_ypd(1, 0), H_armor_ypd(1, 1), H_armor_ypd(1, 2), 0,
+                  H_armor_ypd(2, 0), H_armor_ypd(2, 1), H_armor_ypd(2, 2), 0,
+                                  0,                 0,                 0, 1;
   // clang-format on
 
   return H_armor_ypda * H_armor_xyza;

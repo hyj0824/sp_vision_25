@@ -3,6 +3,7 @@
 
 #include <Eigen/Geometry>
 #include <chrono>
+#include <string>
 
 namespace tools
 {
@@ -41,6 +42,9 @@ Eigen::MatrixXd ypd2xyz_jacobian(const Eigen::Vector3d & ypd);
 // 计算时间差a - b，单位：s
 double delta_time(
   const std::chrono::steady_clock::time_point & a, const std::chrono::steady_clock::time_point & b);
+
+// 当前系统时间字符串，格式为 YYYY-mm-dd_HH-MM-SS
+std::string timestamp_string();
 
 // 向量夹角 总是返回 0 ~ pi 来自SJTU
 double get_abs_angle(const Eigen::Vector2d & vec1, const Eigen::Vector2d & vec2);

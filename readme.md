@@ -192,6 +192,12 @@ IMU型号：使用下位机内置IMU，通过串口上传姿态\
         # Expected output (example):
         # lrwxrwxrwx 1 root root 7 Jul 21 10:00 /dev/gimbal -> ttyACM0
         ```
+7. 生成 TensorRT engine
+    1. 安装 TensorRT 工具链
+    2. 使用 trtexec 工具生成 engine (`/usr/src/tensorrt/bin/trtexec` 可以添加到 PATH)：
+        ```
+        trtexec --onnx=model.onnx --saveEngine=model.engine --fp16
+        ```
 
 ### 3.3 数据流图
 视觉相关模块如图3.1所示。其中，相机线程产生图像、时间戳，通过下位机线程获取对应的云台姿态四元数；图像经过识别器，获得装甲板的四个顶点像素坐标，以及其图案类别；估计器根据装甲板信息，获得目标单位的运动状态；决策器则根据当前的目标运动状态信息，预测目标的运动轨迹，从而判断最佳瞄准位置和最佳开火时机，形成指令发送给下位机；最后控制器和执行机构则根据该指令进行执行，从而完成一个完整的自瞄流程。

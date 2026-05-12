@@ -12,6 +12,10 @@ namespace auto_aim
 constexpr double LIGHTBAR_LENGTH = 56e-3;     // m
 constexpr double BIG_ARMOR_WIDTH = 230e-3;    // m
 constexpr double SMALL_ARMOR_WIDTH = 135e-3;  // m
+// 这里保留“装甲板平面相对竖直的固定倾角”作为几何常量，
+// 视觉噪声交给测量协方差，不把 pitch 作为 outpost 的 EKF 状态去估计。
+constexpr double DEFAULT_ARMOR_PITCH = 15.0 * CV_PI / 180.0;
+constexpr double OUTPOST_ARMOR_PITCH = -15.0 * CV_PI / 180.0;
 
 const std::vector<cv::Point3f> BIG_ARMOR_POINTS{
   {0, BIG_ARMOR_WIDTH / 2, LIGHTBAR_LENGTH / 2},
@@ -93,7 +97,7 @@ std::vector<cv::Point2f> Solver::reproject_armor(
   auto sin_yaw = std::sin(yaw);
   auto cos_yaw = std::cos(yaw);
 
-  auto pitch = (name == ArmorName::outpost) ? -15.0 * CV_PI / 180.0 : 15.0 * CV_PI / 180.0;
+  auto pitch = (name == ArmorName::outpost) ? OUTPOST_ARMOR_PITCH : DEFAULT_ARMOR_PITCH;
   auto sin_pitch = std::sin(pitch);
   auto cos_pitch = std::cos(pitch);
 
@@ -126,7 +130,7 @@ std::vector<cv::Point2f> Solver::reproject_armor(
   return image_points;
 }
 
-double Solver::oupost_reprojection_error(Armor armor, const double & pitch)
+double Solver::outpost_reprojection_error(Armor armor, const double & pitch)
 {
   // solve
   const auto & object_points =
@@ -191,6 +195,12 @@ double Solver::oupost_reprojection_error(Armor armor, const double & pitch)
   auto error = 0.0;
   for (int i = 0; i < 4; i++) error += cv::norm(armor.points[i] - image_points[i]);
   return error;
+}
+
+double Solver::oupost_reprojection_error(Armor armor, const double & pitch)
+{
+  // 旧接口仍可用，但实现统一走正确拼写的版本。
+  return outpost_reprojection_error(armor, pitch);
 }
 
 void Solver::optimize_yaw(Armor & armor) const

@@ -9,6 +9,12 @@
 
 namespace auto_aim
 {
+namespace
+{
+// 前哨站旋转直径固定为 550mm，因此这里用固定半径而不是继续沿用旧的拟合值。
+constexpr double OUTPOST_ARMOR_RADIUS = 0.275;  // m, 550mm rotation diameter
+}  // namespace
+
 Tracker::Tracker(const std::string & config_path, Solver & solver)
 : solver_{solver},
   detect_count_(0),
@@ -247,7 +253,7 @@ bool Tracker::set_target(std::list<Armor> & armors, std::chrono::steady_clock::t
 
   else if (armor.name == ArmorName::outpost) {
     Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 81, 0.4, 100, 1e-4, 0, 0}};
-    target_ = Target(armor, t, 0.2765, 3, P0_dig);
+    target_ = Target(armor, t, OUTPOST_ARMOR_RADIUS, 3, P0_dig);
   }
 
   else if (armor.name == ArmorName::base) {

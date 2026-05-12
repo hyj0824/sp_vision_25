@@ -134,6 +134,23 @@ int main(int argc, char * argv[])
       data["nees_fail"] = target.ekf().data.at("nees_fail");
       data["recent_nis_failures"] = target.ekf().data.at("recent_nis_failures");
     }
+
+    // 串口姿态与状态信息叠加显示
+    const double RAD_TO_DEG = 180 / M_PI;
+    Eigen::Vector3d ypr = tools::eulers(q, 2, 1, 0) * RAD_TO_DEG;  // degree
+    const int base = 70;
+    tools::draw_text(img, fmt::format("recv yaw   {:.2f}", gs.yaw * RAD_TO_DEG), {40, base}, {0, 255, 255});
+    tools::draw_text(img, fmt::format("recv pitch {:.2f}", gs.pitch * RAD_TO_DEG), {40, base+40}, {0, 255, 255});
+    tools::draw_text(img, fmt::format("q->yaw   {:.2f}", ypr[0]), {40, base+90}, {0, 0, 255});
+    tools::draw_text(img, fmt::format("q->pitch {:.2f}", ypr[1]), {40, base+130}, {0, 0, 255});
+    tools::draw_text(img, fmt::format("q->roll  {:.2f}", ypr[2]), {40, base+170}, {0, 0, 255});
+    tools::draw_text(img, fmt::format("q.w {:.5f}", q.w()), {40, base+220}, {255, 255, 0});
+    tools::draw_text(img, fmt::format("q.x {:.5f}", q.x()), {40, base+260}, {255, 255, 0});
+    tools::draw_text(img, fmt::format("q.y {:.5f}", q.y()), {40, base+300}, {255, 255, 0});
+    tools::draw_text(img, fmt::format("q.z {:.5f}", q.z()), {40, base+340}, {255, 255, 0});
+    tools::draw_text(img, fmt::format("bullet speed {:.2f}", gs.bullet_speed), {40, base+390}, {0, 255, 255});
+    tools::draw_text(img, fmt::format("bullet count {}", gs.bullet_count), {40, base+430}, {0, 255, 255});
+
     cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
     cv::imshow("reprojection", img);
     auto key = cv::waitKey(1);

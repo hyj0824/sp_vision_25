@@ -23,10 +23,8 @@ using namespace std::chrono_literals;
 
 const std::string keys =
   "{help h usage ? |                        | 输出命令行参数说明}"
-  "{@config-path   | configs/sentry.yaml | 位置参数，yaml配置文件路径 }";
-
-const double RAD_TO_DEG = 180 / M_PI;
-
+  "{@config-path   | configs/standard3.yaml | 位置参数，yaml配置文件路径 }";
+  
 int main(int argc, char * argv[])
 {
   tools::Exiter exiter;
@@ -113,7 +111,6 @@ int main(int argc, char * argv[])
     camera.read(img, t);
     auto q = gimbal.q(t);
     auto gs = gimbal.state();
-    Eigen::Vector3d ypr = tools::eulers(q, 2, 1, 0) * RAD_TO_DEG;  // degree
 
     solver.set_R_gimbal2world(q);
     auto armors = yolo.detect(img);
@@ -139,21 +136,6 @@ int main(int argc, char * argv[])
         solver.reproject_armor(aim_xyza.head(3), aim_xyza[3], target.armor_type, target.name);
       tools::draw_points(img, image_points, {0, 0, 255});
     }
-
-    // 串口姿态与状态信息叠加显示
-    tools::draw_text(img, fmt::format("yaw   {:.2f}", ypr[0]), {40, 40}, {0, 0, 255});
-    tools::draw_text(img, fmt::format("pitch {:.2f}", ypr[1]), {40, 80}, {0, 0, 255});
-    tools::draw_text(img, fmt::format("roll  {:.2f}", ypr[2]), {40, 120}, {0, 0, 255});
-    tools::draw_text(img, fmt::format("ser yaw   {:.2f}", gs.yaw * RAD_TO_DEG), {40, 170}, {0, 255, 255});
-    tools::draw_text(img, fmt::format("ser pitch {:.2f}", gs.pitch * RAD_TO_DEG), {40, 210}, {0, 255, 255});
-    tools::draw_text(img, fmt::format("q.w {:.5f}", q.w()), {40, 250}, {255, 255, 0});
-    tools::draw_text(img, fmt::format("q.x {:.5f}", q.x()), {40, 290}, {255, 255, 0});
-    tools::draw_text(img, fmt::format("q.y {:.5f}", q.y()), {40, 330}, {255, 255, 0});
-    tools::draw_text(img, fmt::format("q.z {:.5f}", q.z()), {40, 370}, {255, 255, 0});
-    tools::draw_text(
-      img, fmt::format("bullet speed {:.2f}", gs.bullet_speed), {40, 410}, {0, 255, 255});
-    tools::draw_text(
-      img, fmt::format("bullet count {}", gs.bullet_count), {40, 450}, {0, 255, 255});
 
     cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
     cv::imshow("reprojection", img);

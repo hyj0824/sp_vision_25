@@ -11,6 +11,7 @@
 #include "tasks/auto_buff/rune_detector.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
+#include "tools/logger.hpp"
 #include "tools/plotter.hpp"
 #include "tools/recorder.hpp"
 
@@ -40,6 +41,7 @@ int main(int argc, char * argv[])
   cv::Mat img;
   Eigen::Quaterniond q;
   std::chrono::steady_clock::time_point timestamp;
+  bool window_ok = true;
 
   while (!exiter.exit()) {
     camera.read(img, timestamp);
@@ -53,7 +55,15 @@ int main(int argc, char * argv[])
     auto gs = gimbal.state();
     const auto rune_mode =
       gimbal.mode() == io::GimbalMode::BIG_BUFF ? auto_buff::RuneMode::BIG : auto_buff::RuneMode::SMALL;
-    auto command = predictor.aim(rune_mode, timestamp, gs.bullet_speed, true);
+
+    // Static-rune extrinsic/live-fire test: aim at the current solved target without rotation prediction.
+    // It still uses ballistic solving plus rune_yaw_offset/rune_pitch_offset or yaw_offset/pitch_offset.
+    // Change the last argument to true only when the robot is ready to fire at the static target.
+    auto command = predictor.aim_static(timestamp, gs.bullet_speed, false);
+
+    // Predicted rune test: use this line instead of aim_static when validating normal auto-buff.
+    // auto command = predictor.aim(rune_mode, timestamp, gs.bullet_speed, true);
+
     gimbal.send(command);
 
     nlohmann::json data;
@@ -94,11 +104,17 @@ int main(int argc, char * argv[])
 
     plotter.plot(data);
 
-    cv::resize(img, img, {}, 0.5, 0.5);
-    cv::imshow("result", img);
-
-    auto key = cv::waitKey(1);
-    if (key == 'q') break;
+    if (window_ok) {
+      cv::resize(img, img, {}, 0.5, 0.5);
+      try {
+        cv::imshow("result", img);
+        auto key = cv::waitKey(1);
+        if (key == 'q') break;
+      } catch (const cv::Exception & e) {
+        tools::logger()->warn("Disable rune debug window: {}", e.what());
+        window_ok = false;
+      }
+    }
   }
 
   return 0;

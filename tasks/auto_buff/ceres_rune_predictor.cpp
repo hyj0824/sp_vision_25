@@ -344,6 +344,52 @@ io::Command CeresRunePredictor::aim(
   return {true, fire, yaw_pitch->x(), yaw_pitch->y()};
 }
 
+io::Command CeresRunePredictor::aim_static(
+  std::chrono::steady_clock::time_point timestamp, double bullet_speed, bool fire)
+{
+  debug_ = {};
+  debug_.mode = RuneMode::SMALL;
+  if (bullet_speed < 10.0 || bullet_speed > 35.0) bullet_speed = 24.0;
+
+  if (!latest_observation_.has_value()) {
+    return {false, false, 0.0, 0.0};
+  }
+
+  const auto & observation = latest_observation_.value();
+  const double stale_time = tools::delta_time(timestamp, observation.timestamp);
+  if (stale_time > stale_reset_time_) {
+    reset(timestamp);
+    return {false, false, 0.0, 0.0};
+  }
+
+  double fly_time = 0.0;
+  const auto yaw_pitch = solve_yaw_pitch(observation.target_in_world, bullet_speed, fly_time);
+  if (!yaw_pitch.has_value()) return {false, false, 0.0, 0.0};
+
+  debug_.valid = true;
+  debug_.current_target_in_world = observation.target_in_world;
+  debug_.predict_target_in_world = observation.target_in_world;
+  debug_.relative_angle = angle_rel_;
+  debug_.raw_relative_angle = raw_angle_rel_;
+  debug_.filtered_relative_angle = angle_rel_;
+  debug_.angle_velocity = angle_state_(0);
+  debug_.predict_rotation = 0.0;
+  debug_.fly_time = fly_time;
+  debug_.yaw = yaw_pitch->x();
+  debug_.pitch = yaw_pitch->y();
+  debug_.direction = static_cast<int>(direction_sign());
+  debug_.lost_count = lost_count_;
+  fill_debug_model(tools::delta_time(observation.timestamp, start_time_));
+
+  bool shoot = false;
+  if (fire && tools::delta_time(timestamp, last_fire_time_) > fire_gap_time_) {
+    shoot = true;
+    last_fire_time_ = timestamp;
+  }
+
+  return {true, shoot, yaw_pitch->x(), yaw_pitch->y()};
+}
+
 bool CeresRunePredictor::solve_pnp(
   const RuneDetection & detection, RuneObservation & observation) const
 {

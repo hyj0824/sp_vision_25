@@ -74,6 +74,8 @@ public:
   io::Command aim(
     RuneMode mode, std::chrono::steady_clock::time_point timestamp, double bullet_speed,
     bool to_now = true);
+  io::Command aim_static(
+    std::chrono::steady_clock::time_point timestamp, double bullet_speed, bool fire = false);
 
   const RuneAimDebug & debug() const { return debug_; }
 

@@ -1,6 +1,8 @@
 #include <atomic>
 #include <chrono>
+#include <fmt/format.h>
 #include <opencv2/opencv.hpp>
+#include <yaml-cpp/yaml.h>
 
 #include "io/camera.hpp"
 #include "io/gimbal/gimbal.hpp"
@@ -52,8 +54,11 @@ int main(int argc, char * argv[])
 
   auto_aim::multithread::CommandGener commandgener(shooter, aimer, gimbal, plotter);
 
+  const auto yaml = YAML::LoadFile(config_path);
+  const bool rune_show_window = yaml["rune_show_window"] && yaml["rune_show_window"].as<bool>();
   std::atomic<io::GimbalMode> mode{io::GimbalMode::IDLE};
   auto last_mode{io::GimbalMode::IDLE};
+  bool rune_window_ok = rune_show_window;
 
   while (!exiter.exit()) {
     mode = gimbal.mode();
@@ -102,6 +107,47 @@ int main(int argc, char * argv[])
         mode.load() == io::GimbalMode::BIG_BUFF ? auto_buff::RuneMode::BIG : auto_buff::RuneMode::SMALL;
       auto command = rune_predictor.aim(rune_mode, t, gs.bullet_speed, true);
       gimbal.send(command);
+
+      if (rune_window_ok) {
+        if (detection.has_value()) {
+          for (std::size_t i = 0; i < detection->keypoints.size(); ++i) {
+            tools::draw_point(img, detection->keypoints[i]);
+            cv::putText(
+              img, std::to_string(i), detection->keypoints[i], cv::FONT_HERSHEY_SIMPLEX, 0.8,
+              cv::Scalar(255, 255, 255), 2);
+          }
+          const cv::Point label_pos{
+            static_cast<int>(detection->rect.x), static_cast<int>(detection->rect.y)};
+          cv::putText(
+            img, fmt::format("rune {:.2f}", detection->confidence), label_pos,
+            cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);
+        }
+        const auto & debug = rune_predictor.debug();
+        cv::putText(
+          img,
+          fmt::format(
+            "buff {} ctrl:{} shoot:{} yaw:{:.2f} pitch:{:.2f}",
+            rune_mode == auto_buff::RuneMode::BIG ? "BIG" : "SMALL", command.control ? 1 : 0,
+            command.shoot ? 1 : 0, command.yaw * 57.3, command.pitch * 57.3),
+          {10, 30}, cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 255), 2);
+        if (debug.valid) {
+          cv::putText(
+            img,
+            fmt::format(
+              "pred:{:.2f} fly:{:.3f} fit:{} dir:{}", debug.predict_rotation * 57.3,
+              debug.fly_time, debug.fit_data_size, debug.direction),
+            {10, 60}, cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 255), 2);
+        }
+
+        cv::resize(img, img, {}, 0.5, 0.5);
+        try {
+          cv::imshow("rune", img);
+          cv::waitKey(1);
+        } catch (const cv::Exception & e) {
+          tools::logger()->warn("Disable rune camera window: {}", e.what());
+          rune_window_ok = false;
+        }
+      }
 
     } else
       continue;
